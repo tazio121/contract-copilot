@@ -23,11 +23,11 @@
   </a>
 </p>
 
+<hr/>
 
-# 🧾 Contract Co-Pilot
-Upload contracts → Get clear, plain-English summaries + risk alerts — fast, accurate, and transparent.
-
----
+<p align="center">
+  <sub>Made with 💛 using FastAPI & Streamlit — © 2025 Tazio Hussain</sub>
+</p>
 
 ## 🧭 Overview
 **Contract Co-Pilot** analyzes contracts clause-by-clause and flags potential risks.  
@@ -111,5 +111,6 @@ MIT License © 2025 Tazio Hussain
 ## 🏁 Project Origins
 
 Started as a local prototype in VS Code to explore AI-driven contract analysis and risk scoring — now evolving into a full-stack tool for smarter, faster contract review.
+
 
 
