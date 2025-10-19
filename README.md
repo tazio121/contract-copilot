@@ -25,3 +25,55 @@ Built with **FastAPI (backend)** and **Streamlit (frontend)**, it combines claus
 ```bash
 git clone https://github.com/tazio121/contract-copilot.git
 cd contract-copilot
+
+2️⃣ Set up the environment
+
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+3️⃣ Run the backend (FastAPI)
+
+uvicorn backend.main:app --host 127.0.0.1 --port 8787 --reload
+
+Open Swagger UI → http://127.0.0.1:8787/docs
+4️⃣ Run the frontend (Streamlit)
+
+streamlit run frontend/app.py --server.port 8501
+
+App will open at → http://localhost:8501
+🧾 Example Output
+
+Each clause is identified (e.g., Termination, Indemnity, Confidentiality) and summarized in plain English with a color-coded risk badge.
+🧰 Tech Stack
+
+    Frontend: Streamlit + custom CSS
+
+    Backend: FastAPI + Pydantic + Uvicorn
+
+    Parsing: PyMuPDF (fitz) for PDF extraction
+
+    AI Engine: Transformers / OpenAI API compatible
+
+    Language: Python 3.9 +
+
+🔐 Environment Variables
+
+Create a .env file in the project root:
+
+API_BASE=http://127.0.0.1:8787
+
+🤝 Contributing
+
+Pull requests are welcome!
+1️⃣ Fork the repo
+2️⃣ Create a feature branch (feature/your-feature)
+3️⃣ Commit your changes
+4️⃣ Push and open a Pull Request
+📄 License
+
+MIT License © 2025 Tasib Hussain
+🏁 Project Origins
+
+Started as a local prototype in VS Code to explore AI-driven contract analysis and risk scoring — now evolving into a full-stack tool for smarter, faster contract review.
+
