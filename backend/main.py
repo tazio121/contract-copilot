@@ -4,7 +4,6 @@ from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Any, Dict, List, Tuple
-from transformers import pipeline
 from datetime import datetime
 from pathlib import Path
 import base64
