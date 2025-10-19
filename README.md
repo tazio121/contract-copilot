@@ -1,3 +1,29 @@
+<p align="center">
+  <img src="static/ccp-logo.png" alt="Contract Co-Pilot logo" height="80">
+</p>
+
+<h1 align="center">Contract Co-Pilot</h1>
+
+<p align="center">
+  Upload contracts → Get clear, plain-English summaries + risk alerts — fast, accurate, and transparent.
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/">
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.9%2B-blue?logo=python">
+  </a>
+  <a href="https://fastapi.tiangolo.com/">
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-rocket-brightgreen">
+  </a>
+  <a href="https://streamlit.io/">
+    <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-UI-red">
+  </a>
+  <a href="LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue">
+  </a>
+</p>
+
+
 # 🧾 Contract Co-Pilot
 Upload contracts → Get clear, plain-English summaries + risk alerts — fast, accurate, and transparent.
 
@@ -85,4 +111,5 @@ MIT License © 2025 Tazio Hussain
 ## 🏁 Project Origins
 
 Started as a local prototype in VS Code to explore AI-driven contract analysis and risk scoring — now evolving into a full-stack tool for smarter, faster contract review.
+
 
