@@ -73,13 +73,16 @@ API_BASE=http://127.0.0.1:8787
 ## 🤝 Contributing
 
 Pull requests are welcome!
+
 1️⃣ Fork the repo
 2️⃣ Create a feature branch (feature/your-feature)
 3️⃣ Commit your changes
 4️⃣ Push and open a Pull Request
-📄 License
 
+## 📄 License
 MIT License © 2025 Tazio Hussain
+
 ## 🏁 Project Origins
 
 Started as a local prototype in VS Code to explore AI-driven contract analysis and risk scoring — now evolving into a full-stack tool for smarter, faster contract review.
+
