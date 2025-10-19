@@ -1,0 +1,34 @@
+# ---- Python / FastAPI / Streamlit
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+venv/
+.env
+.env.*.local
+.DS_Store
+
+# ---- Streamlit cache
+.streamlit/
+**/.streamlit/**
+
+# ---- Build / reports / temp
+dist/
+build/
+*.html
+reports/
+tmp/
+.cache/
+.ipynb_checkpoints/
+
+# ---- IDE
+.vscode/
+.idea/
+
+# ---- Node (if any frontend assets)
+node_modules/
+
+# ---- OS junk
+Thumbs.db
