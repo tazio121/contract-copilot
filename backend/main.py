@@ -11,6 +11,37 @@ import io, re, os
 import textwrap
 import warnings
 import logging
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
+
+# --- App instance (must be defined before using @app.* decorators) ---
+app = FastAPI(title="Contract Co-Pilot API", version="0.1.0")
+
+# --- CORS (you can tighten allow_origins to your hosted UI later) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Static mount (serves /static/* if you have a static/ folder) ---
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# --- Basic/health routes (keep these near the top is fine) ---
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
+
+@app.get("/", include_in_schema=False)
+def root():
+    return {"message": "Contract Co-Pilot API"}
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    path = Path("static/favicon-32.png")
+    return FileResponse(path, media_type="image/png") if path.exists() else Response(status_code=204)
 
 # -----------------------------------------------------------------------------
 # Feature flags (opt-in for Hugging Face on bigger instances)
