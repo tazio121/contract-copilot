@@ -1,36 +1,85 @@
 ﻿# backend/main.py
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Any, Dict, List, Tuple
 from datetime import datetime
 from pathlib import Path
 import base64
-import io, re
-from fastapi.responses import JSONResponse
+import io, re, os
 import textwrap
 import warnings
 import logging
-from transformers import pipeline, AutoTokenizer
 
-# — Make transformers quieter —
-logging.getLogger("transformers").setLevel(logging.ERROR)
-warnings.filterwarnings(
-    "ignore",
-    message=r"Your max_length is set to .* Since this is a summarization task",
-    category=UserWarning,
-)
+# -----------------------------------------------------------------------------
+# Feature flags (opt-in for Hugging Face on bigger instances)
+# -----------------------------------------------------------------------------
+USE_HF_SUMMARY = os.getenv("USE_HF_SUMMARY", "0") == "1"
+HF_SUMMARY_MODEL = os.getenv("HF_SUMMARY_MODEL", "sshleifer/distilbart-cnn-12-6")
 
-# — Init once (CPU) —
-SUMM_MODEL_ID = "facebook/bart-large-cnn"  # or your existing model
-_sum_tokenizer = AutoTokenizer.from_pretrained(SUMM_MODEL_ID)
-SUMMARIZER = pipeline(
-    "summarization",
-    model=SUMM_MODEL_ID,
-    tokenizer=SUMM_MODEL_ID,
-    device=-1,  # CPU
-)
+USE_HF_PIPELINES = os.getenv("USE_HF_PIPELINES", "0") == "1"
+
+# -----------------------------------------------------------------------------
+# Token approximation + simple text utilities for lightweight summarization
+# -----------------------------------------------------------------------------
+_STOPWORDS = {
+    "the","and","a","an","of","to","in","for","on","by","with","as","at","from","or","that","this",
+    "is","are","was","were","be","been","it","its","their","there","here","such","any","all","each",
+    "shall","may","must","will","can","not","no","without","including","include","but","if","then"
+}
+_TOKEN_FACTOR = 1.3  # rough word->token conversion
+
+def _approx_tokens(text: str) -> int:
+    return max(1, int(len(re.findall(r"\w+", text)) * _TOKEN_FACTOR))
+
+def _sentences(text: str) -> List[str]:
+    parts = re.split(r'(?<=[.!?])\s+', (text or "").strip())
+    return [s.strip() for s in parts if s.strip()]
+
+def _words(text: str) -> List[str]:
+    return re.findall(r"[A-Za-z][A-Za-z\-']+", (text or "").lower())
+
+def _word_freq(text: str) -> dict:
+    freq: dict = {}
+    for w in _words(text):
+        if w in _STOPWORDS:
+            continue
+        freq[w] = freq.get(w, 0) + 1
+    if not freq:
+        return {}
+    mx = max(freq.values())
+    return {k: v / mx for k, v in freq.items()}
+
+def _score_sentence(sent: str, freq: dict) -> float:
+    if not freq:
+        return len(_words(sent))  # fallback: length as proxy
+    return sum(freq.get(w, 0.0) for w in _words(sent))
+
+def _pick_sentences(sents: List[str], max_tokens: int, min_tokens: int) -> str:
+    # Score sentences, select best but preserve original order
+    freq = _word_freq(" ".join(sents))
+    scored: List[Tuple[int, float, str]] = [(i, _score_sentence(s, freq), s) for i, s in enumerate(sents)]
+    ranked = sorted(scored, key=lambda x: (-x[1], x[0]))[: max(1, len(sents)//2 or 1)]
+    keep_idx = sorted([i for i, _, _ in ranked])  # restore doc order
+
+    out, tokens = [], 0
+    for i in keep_idx:
+        t = int(len(_words(sents[i])) * _TOKEN_FACTOR)
+        if not out and t > max_tokens:
+            words = _words(sents[i])
+            budget_words = max(1, int(max_tokens / _TOKEN_FACTOR))
+            out.append(" ".join(words[:budget_words]).rstrip() + "…")
+            tokens = max_tokens
+            break
+        if tokens + t <= max_tokens or tokens < min_tokens:
+            out.append(sents[i])
+            tokens += t
+        if tokens >= max_tokens:
+            break
+    if not out and sents:
+        out = [sents[0]]
+    return " ".join(out)
 
 def summarize_smart(text: str,
                     ratio: float = 0.45,
@@ -38,58 +87,128 @@ def summarize_smart(text: str,
                     min_cap: int = 20,
                     short_floor_tokens: int = 28) -> str:
     """
-    Choose max/min_length based on input token length so we don't over-ask.
-    - ratio: target fraction of input tokens for the summary
-    - max_cap: absolute ceiling for max_length
-    - min_cap: absolute floor for min_length
+    Smart summary that adapts length to input size.
+    - ratio: target fraction of input *tokens* for the summary
+    - max_cap/min_cap: clamps for the token budget
+    - short_floor_tokens: return original if input is already short
     """
-
-    # Token length (cheap + accurate)
-    toks = len(_sum_tokenizer.encode(text, add_special_tokens=False))
-
-    # Very short inputs? Don't summarize; return as-is.
+    # 1) Early exit for very short inputs
+    toks = _approx_tokens(text)
     if toks <= short_floor_tokens:
         return text
 
-    # Target lengths
+    # 2) Compute budget (approx tokens)
     max_len = max(min_cap, min(int(toks * ratio), max_cap))
-    # min_length is typically ~40–60% of max_length to avoid ultra-short outputs
     min_len = max(min_cap, min(int(max_len * 0.6), max_len - 1))
 
-    out = SUMMARIZER(
-        text,
-        max_length=max_len,
-        min_length=min_len,
-        do_sample=False,
-        truncation=True,         # keep inputs within model limits
-        no_repeat_ngram_size=3,  # cleaner summaries
-    )[0]["summary_text"]
-    return out
+    # 3) Try HF pipeline if explicitly enabled; otherwise fallback
+    if USE_HF_SUMMARY:
+        try:
+            from transformers import pipeline  # lazy import
+            summarizer = pipeline("summarization", model=HF_SUMMARY_MODEL)
+            out = summarizer(
+                text,
+                max_length=max_len,
+                min_length=min_len,
+                do_sample=False,
+                truncation=True,
+                no_repeat_ngram_size=3,
+            )[0]["summary_text"]
+            return out
+        except Exception:
+            # If HF not available or OOM, fall through to lightweight method
+            pass
 
-# -------- PDF parsing backend preference (PyMuPDF first) --------
+    # 4) Lightweight extractive summary
+    sents = _sentences(text)
+    if not sents:
+        return text
+    return _pick_sentences(sents, max_tokens=max_len, min_tokens=min_len)
+
+# -----------------------------------------------------------------------------
+# PDF parsing (prefer PyMuPDF, fallback to pdfminer.six)
+# -----------------------------------------------------------------------------
 try:
     import fitz  # PyMuPDF
     USE_PYMUPDF = True
     _FitzEmptyFileError = fitz.EmptyFileError
     _FitzFileDataError = fitz.FileDataError
 except Exception:
-    # If PyMuPDF isn't available, set a safe fallback
     USE_PYMUPDF = False
     fitz = None
+    class _FitzEmptyFileError(Exception): ...
+    class _FitzFileDataError(Exception): ...
 
-    class _FitzEmptyFileError(Exception):
-        pass
+def _extract_text_pymupdf(pdf_bytes: bytes) -> str:
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            if getattr(doc, "needs_pass", False):
+                raise HTTPException(status_code=400, detail="PDF is password-protected.")
+            parts = []
+            for p in doc:
+                parts.append(p.get_text("text"))
+            return ("\n".join(parts)).strip()
+    except _FitzEmptyFileError:
+        raise HTTPException(status_code=400, detail="Empty or invalid PDF file.")
+    except _FitzFileDataError as e:
+        # Let caller try fallback
+        raise e
+    except Exception as e:
+        # Unexpected primary parser issue → let caller try fallback
+        raise RuntimeError(f"PyMuPDF parse error: {e}")
 
-    class _FitzFileDataError(Exception):
-        pass
+def _extract_text_pdfminer(pdf_bytes: bytes) -> str:
+    try:
+        from pdfminer.high_level import extract_text
+        return (extract_text(io.BytesIO(pdf_bytes)) or "").strip()
+    except Exception as e:
+        raise RuntimeError(f"PDFMiner parse error: {e}")
 
-# -------- App + static --------
+def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """
+    Primary: PyMuPDF (if available), fallback: pdfminer.six.
+    Raises HTTPException for client errors (empty, password, no text).
+    """
+    if not pdf_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    text = ""
+
+    if USE_PYMUPDF and fitz is not None:
+        try:
+            text = _extract_text_pymupdf(pdf_bytes)
+        except _FitzFileDataError:
+            text = _extract_text_pdfminer(pdf_bytes)
+        except RuntimeError:
+            text = _extract_text_pdfminer(pdf_bytes)
+    else:
+        try:
+            text = _extract_text_pdfminer(pdf_bytes)
+        except RuntimeError:
+            if fitz is not None:
+                try:
+                    text = _extract_text_pymupdf(pdf_bytes)
+                except _FitzFileDataError:
+                    raise HTTPException(status_code=400, detail="Invalid or corrupted PDF file.")
+                except RuntimeError as e2:
+                    raise HTTPException(status_code=400, detail=str(e2))
+            else:
+                raise HTTPException(status_code=400, detail="Could not parse PDF (no parser available).")
+
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract any text from the PDF. If it's a scan, run OCR first."
+        )
+    return text
+
+# -----------------------------------------------------------------------------
+# FastAPI app + static + health
+# -----------------------------------------------------------------------------
 app = FastAPI(title="Contract Co-Pilot API")
 
 # Serve files from ./static at /static/...
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Favicon: serve static/favicon-32.png if present; else 204 (no icon)
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     path = Path("static/favicon-32.png")
@@ -97,7 +216,6 @@ def favicon():
         return FileResponse(path, media_type="image/png")
     return Response(status_code=204)
 
-# Health + root
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -106,24 +224,106 @@ def health():
 def root():
     return {"ok": True, "message": "Contract Co-Pilot API is running. See /docs and /health."}
 
-# -------- Load/Embed brand logo once (offline-safe in reports) --------
+# -----------------------------------------------------------------------------
+# Brand logo (embed once for offline-safe HTML reports)
+# -----------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # .../contract-copilot
 LOGO_FILE = PROJECT_ROOT / "static" / "ccp-logo.png"
 try:
     LOGO_DATA_URI = "data:image/png;base64," + base64.b64encode(LOGO_FILE.read_bytes()).decode("ascii")
 except Exception:
-    LOGO_DATA_URI = None  # if missing, report will omit logo unless meta overrides
+    LOGO_DATA_URI = None  # omit logo if missing
 
-# -------- Hugging Face pipelines (CPU-friendly models) --------
-zsc = pipeline("zero-shot-classification", model="typeform/distilbert-base-uncased-mnli")
-ner = pipeline("token-classification", model="dslim/bert-base-NER", aggregation_strategy="simple")
-
+# -----------------------------------------------------------------------------
+# Render-friendly classifiers (no heavy deps by default)
+# -----------------------------------------------------------------------------
 CANDIDATE_LABELS = [
     "Termination","Liability","Indemnification","Confidentiality","Payment Terms",
     "Intellectual Property","Governing Law","Warranty","Non-compete","Arbitration",
 ]
 
-# ---------- Risk Engine v2 (tuned) ----------
+LABEL_PATTERNS = {
+    "Termination":        [r"\bterminate\b", r"\btermination\b", r"without cause", r"\bnotice\b"],
+    "Liability":          [r"\bliabilit(y|ies)\b", r"\bcap\b", r"\blimit(ation)?\b", r"\bunlimited\b"],
+    "Indemnification":    [r"\bindemnif(y|ication)\b", r"\bhold harmless\b", r"\bdefend\b"],
+    "Confidentiality":    [r"\bconfidential(ity)?\b", r"\bnon[- ]disclosure\b", r"\bnda\b"],
+    "Payment Terms":      [r"\bfee(s)?\b", r"\bpayment\b", r"\binvoice\b", r"\binterest\b", r"\bnet\s*\d+"],
+    "Intellectual Property":[r"\bintellectual property\b", r"\bip\b", r"\bassign(ment|s)?\b", r"\blicense\b"],
+    "Governing Law":      [r"\bgoverning law\b", r"\bvenue\b", r"\bjurisdict(ion|ional)\b"],
+    "Warranty":           [r"\bwarrant(y|ies)\b", r"\bdisclaimer\b", r"\bmerchantab(ility|le)\b", r"\bfitness\b"],
+    "Non-compete":        [r"\bnon[- ]compete\b", r"\brestrictive covenant\b"],
+    "Arbitration":        [r"\barbitrat(e|ion)\b", r"\badr\b", r"\bdispute resolution\b"],
+}
+
+def _score_labels_fallback(text: str) -> List[Tuple[str, float]]:
+    t = (text or "").lower()
+    raw: Dict[str, int] = {}
+    for label, pats in LABEL_PATTERNS.items():
+        hits = 0
+        for p in pats:
+            if re.search(p, t, flags=re.I):
+                hits += 1
+        if hits:
+            raw[label] = hits
+    if not raw:
+        return []
+    mx = max(raw.values())
+    pairs = [(label, raw[label] / mx) for label in raw]  # normalize 0..1
+    pairs.sort(key=lambda x: x[1], reverse=True)
+    return pairs[:5]
+
+def tag_labels(text: str) -> List[Tuple[str, float]]:
+    """
+    Prefer HF zero-shot if explicitly enabled; otherwise lightweight keyword fallback.
+    Returns sorted list of (label, score) pairs.
+    """
+    if USE_HF_PIPELINES:
+        try:
+            from transformers import pipeline
+            zsc = pipeline("zero-shot-classification", model="typeform/distilbert-base-uncased-mnli")
+            z = zsc(text, CANDIDATE_LABELS, multi_label=True)
+            pairs = list(zip(z["labels"], [float(x) for x in z["scores"]]))
+            pairs = [(l, s) for (l, s) in pairs if s >= 0.55]
+            pairs.sort(key=lambda x: x[1], reverse=True)
+            return pairs[:5]
+        except Exception:
+            pass
+    return _score_labels_fallback(text)
+
+def _clean_ent_text(txt: str) -> str:
+    return (txt or "").replace("##", "").replace(" .", ".").strip()
+
+def _regex_entities(text: str) -> List[Dict[str, Any]]:
+    # Cheap NER fallback — capture likely entities by capitalization/acronyms.
+    ents = re.findall(r"\b([A-Z][A-Za-z]{2,}|[A-Z]{2,})\b", text or "")
+    seen, out = set(), []
+    for e in ents:
+        if e not in seen:
+            seen.add(e)
+            out.append({"text": e, "label": "ORG", "score": 1.0})
+    return out
+
+def extract_entities(text: str) -> List[Dict[str, Any]]:
+    """Prefer HF NER if enabled; otherwise use regex fallback."""
+    if USE_HF_PIPELINES:
+        try:
+            from transformers import pipeline
+            ner = pipeline("token-classification", model="dslim/bert-base-NER", aggregation_strategy="simple")
+            ents_raw = ner((text or "")[:1500])  # avoid huge inputs
+            return [{
+                "text": _clean_ent_text(e.get("word")),
+                "label": e.get("entity_group"),
+                "score": float(e.get("score", 0)),
+                "start": int(e.get("start", 0)),
+                "end": int(e.get("end", 0)),
+            } for e in ents_raw]
+        except Exception:
+            pass
+    return _regex_entities(text)
+
+# -----------------------------------------------------------------------------
+# Risk Engine v2 (tuned)
+# -----------------------------------------------------------------------------
 RULES: List[Tuple[str, int, str]] = [
     # Termination
     (r"terminate (this|the)?\s*(agreement|contract).{0,60}without cause", 70, "Termination without cause"),
@@ -169,7 +369,7 @@ def score_risk(snippet: str) -> Dict:
     return {"risk_score": score, "risk_level": level, "risk_reasons": sorted(set(reasons))}
 
 def dynamic_lengths(text: str) -> Tuple[int, int]:
-    wc = max(1, len(text.split()))
+    wc = max(1, len((text or "").split()))
     max_len = min(180, max(40, wc // 2))
     min_len = min(80,  max(20, wc // 4))
     return max_len, min_len
@@ -185,35 +385,20 @@ def make_summary(text: str, max_len: int = 180, min_len: int = 60) -> str:
         # Robust fallback so PDFs never 500
         return textwrap.shorten((text or "").strip().replace("\n", " "), width=600, placeholder="…")
 
-def tag_labels(text: str):
-    z = zsc(text, CANDIDATE_LABELS, multi_label=True)
-    pairs = list(zip(z["labels"], [float(x) for x in z["scores"]]))
-    pairs = [(l, s) for (l, s) in pairs if s >= 0.55]
-    pairs.sort(key=lambda x: x[1], reverse=True)
-    return pairs[:5]
-
+# -----------------------------------------------------------------------------
+# Lightweight extractors
+# -----------------------------------------------------------------------------
 DATE_RE = re.compile(r"\b(?:\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4})\b", re.I)
 AMOUNT_RE = re.compile(r"\b(?:£|\$|€)\s?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?\b|\b\d+(?:\.\d{2})?\s?(?:USD|GBP|EUR)\b", re.I)
-
-def _clean_ent_text(txt: str) -> str:
-    return (txt or "").replace("##", "").replace(" .", ".").strip()
 
 def extract_dates_amounts(text: str) -> Dict[str, list]:
     dates = DATE_RE.findall(text or "")
     amounts = AMOUNT_RE.findall(text or "")
     return {"dates": sorted(set(dates)), "amounts": sorted(set(amounts))}
 
-def extract_entities(text: str):
-    ents_raw = ner((text or "")[:1500])
-    return [{
-        "text": _clean_ent_text(e.get("word")),
-        "label": e.get("entity_group"),
-        "score": float(e.get("score", 0)),
-        "start": int(e.get("start", 0)),
-        "end": int(e.get("end", 0)),
-    } for e in ents_raw]
-
-# ---------- Clause splitting ----------
+# -----------------------------------------------------------------------------
+# Clause splitting
+# -----------------------------------------------------------------------------
 HEADLINE = re.compile(r"^\s*([A-Z][A-Z \-\d]{3,})\s*$")
 def split_into_clauses(text: str, max_clauses: int = 18) -> List[str]:
     raw = re.sub(r"\r\n?", "\n", text or "")
@@ -244,7 +429,9 @@ def split_into_clauses(text: str, max_clauses: int = 18) -> List[str]:
         clauses = [text.strip()]
     return clauses[:max_clauses]
 
-# ---------- Core analyzers ----------
+# -----------------------------------------------------------------------------
+# Core analyzers
+# -----------------------------------------------------------------------------
 class AnalyzeTextIn(BaseModel):
     text: str
 
@@ -266,7 +453,6 @@ def analyze_core(snippet: str) -> Dict:
 
     # fallback for older score_risk that doesn’t include reasons
     if not risk_reasons and isinstance(risk, dict):
-        # simple heuristic-based extraction
         text_lower = snippet.lower()
         if "terminate" in text_lower:
             risk_reasons.append("Termination clause")
@@ -327,10 +513,12 @@ def analyze_clauses(text: str) -> Dict:
         "clauses": analyzed
     }
 
-# ---------- HTML report ----------
+# -----------------------------------------------------------------------------
+# HTML report builder
+# -----------------------------------------------------------------------------
 def build_html_report(doc_title: str, overall: Dict, clauses: List[Dict], meta: Dict = None) -> str:
     meta = meta or {}
-    logo_url = meta.get("logo_url") or LOGO_DATA_URI  # default to embedded logo if available
+    logo_url = meta.get("logo_url") or LOGO_DATA_URI
     source_name = meta.get("source_name", "Text input")
     generated_at = meta.get("generated_at", "")
     css = """
@@ -381,7 +569,7 @@ def build_html_report(doc_title: str, overall: Dict, clauses: List[Dict], meta: 
     for c in clauses:
         tags = ", ".join([f"{l} ({s:.2f})" for l, s in c.get("labels", [])]) or "—"
         rr = ", ".join(c.get("risk_reasons", [])) or "—"
-        ents = ", ".join([f"{e['text']}·{e['label']}" for e in c.get("entities", [])[:10]]) or "—"
+        ents = ", ".join([f"{e['text']}·{e.get('label','')}" for e in c.get("entities", [])[:10]]) or "—"
         body += f"""
           <div class="card">
             <h3>Clause {c['index']} — <span class="badge {c['risk_level']}">{c['risk_level'].title()} {c['risk_score']}/100</span></h3>
@@ -395,82 +583,23 @@ def build_html_report(doc_title: str, overall: Dict, clauses: List[Dict], meta: 
     html = f"<!doctype html><html><head><meta charset='utf-8'><title>{doc_title}</title>{css}</head><body>{header}{body}</body></html>"
     return html
 
-# ---------- Helpers for safer text & PDF parsing ----------
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 def _safe_trim(s: str, n: int) -> str:
     if not s:
         return s
     s = s.strip()
     return s[:n]
 
-def _extract_text_pymupdf(pdf_bytes: bytes) -> str:
-    # Only call this if PyMuPDF is available
-    try:
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            if getattr(doc, "needs_pass", False):
-                # Client issue: encrypted PDF
-                raise HTTPException(status_code=400, detail="PDF is password-protected.")
-            parts = []
-            for p in doc:
-                parts.append(p.get_text("text"))
-            return ("\n".join(parts)).strip()
-    except _FitzEmptyFileError:
-        raise HTTPException(status_code=400, detail="Empty or invalid PDF file.")
-    except _FitzFileDataError as e:
-        # Let caller try fallback
-        raise e
-    except Exception as e:
-        # Unexpected primary parser issue → let caller try fallback
-        raise RuntimeError(f"PyMuPDF parse error: {e}")
+# -----------------------------------------------------------------------------
+# Public endpoints
+# -----------------------------------------------------------------------------
+class AnalyzeTextIn(BaseModel):
+    text: str
 
-def _extract_text_pdfminer(pdf_bytes: bytes) -> str:
-    try:
-        from pdfminer.high_level import extract_text
-        return (extract_text(io.BytesIO(pdf_bytes)) or "").strip()
-    except Exception as e:
-        raise RuntimeError(f"PDFMiner parse error: {e}")
-
-def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """
-    Primary: PyMuPDF (if available), fallback: pdfminer.six.
-    Raises HTTPException for client errors (empty, password, no text).
-    """
-    if not pdf_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    text = ""
-
-    if USE_PYMUPDF and fitz is not None:
-        try:
-            text = _extract_text_pymupdf(pdf_bytes)
-        except _FitzFileDataError:
-            text = _extract_text_pdfminer(pdf_bytes)
-        except RuntimeError:
-            text = _extract_text_pdfminer(pdf_bytes)
-    else:
-        try:
-            text = _extract_text_pdfminer(pdf_bytes)
-        except RuntimeError:
-            # Last resort: try PyMuPDF if present
-            if fitz is not None:
-                try:
-                    text = _extract_text_pymupdf(pdf_bytes)
-                except _FitzFileDataError:
-                    raise HTTPException(status_code=400, detail="Invalid or corrupted PDF file.")
-                except RuntimeError as e2:
-                    raise HTTPException(status_code=400, detail=str(e2))
-            else:
-                raise HTTPException(status_code=400, detail="Could not parse PDF (no parser available).")
-
-    if not text:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not extract any text from the PDF. If it's a scan, run OCR first."
-        )
-    return text
-
-# ---------- Public endpoints ----------
 @app.post("/analyze_text")
 def analyze_text(payload: AnalyzeTextIn):
-    # same behavior, now with safe-trim and clear 4xx on empty
     text = _safe_trim(payload.text or "", 4000)
     if not text:
         raise HTTPException(status_code=400, detail="No text provided.")
@@ -478,7 +607,6 @@ def analyze_text(payload: AnalyzeTextIn):
 
 @app.post("/analyze_text_detailed")
 def analyze_text_detailed(payload: AnalyzeTextIn):
-    # same behavior, now with safe-trim and clear 4xx on empty
     text = _safe_trim(payload.text or "", 10000)
     if not text:
         raise HTTPException(status_code=400, detail="No text provided.")
@@ -492,10 +620,8 @@ async def analyze_pdf(file: UploadFile = File(...)):
     try:
         text = _extract_text_from_pdf(content)
     except HTTPException:
-        # pass through known client-side issues (password/empty/no text)
         raise
     except Exception as e:
-        # unexpected server-side issue
         raise HTTPException(status_code=500, detail=f"PDF parse error: {e}")
     snippet = _safe_trim(text, 6000)
     if not snippet:
@@ -522,7 +648,6 @@ def report_text_detailed(payload: AnalyzeTextIn):
         raise HTTPException(status_code=400, detail="No text provided.")
     res = analyze_clauses(text)
     meta = {
-        # No need to pass logo_url; build_html_report defaults to embedded LOGO_DATA_URI
         "source_name": "Text input",
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
