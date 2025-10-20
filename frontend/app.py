@@ -1174,6 +1174,11 @@ if TAB == "Paste Text":
         border:1px solid #2a2f37; background:#0f131a; border-radius:999px;
         font-size:12px; opacity:.9;
       }
+      .sticky-actions{
+        position: sticky; bottom: 0; z-index: 3;
+        background: #0e1117; padding-top: 8px; margin-top: 8px;
+        border-top: 1px solid #2a2f37;
+      }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1196,9 +1201,9 @@ if TAB == "Paste Text":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
+        # IMPORTANT: Streamlit on some hosts rejects key= for form_submit_button → removed
         submit_quick = st.form_submit_button(
             "Analyze Text",
-            key="quick_analyze_btn",
             use_container_width=True,
             disabled=st.session_state.quick_busy,
         )
@@ -1215,15 +1220,19 @@ if TAB == "Paste Text":
             try:
                 payload = {"text": st.session_state.quick_input}
 
+                # Resolve backend URL safely: prefer env(API_BASE), fall back to global BACKEND or localhost
+                import os
+                BACKEND_URL = os.getenv("API_BASE") or (BACKEND if "BACKEND" in globals() else "http://127.0.0.1:8787")
+
                 status.write("Sending text to /analyze_text …")
-                r = requests.post(f"{BACKEND}/analyze_text", json=payload, timeout=45)
+                r = requests.post(f"{BACKEND_URL}/analyze_text", json=payload, timeout=45)
                 r.raise_for_status()
                 st.session_state.quick_result = r.json()
 
                 # Optional: printable report
                 status.write("Building printable report …")
                 try:
-                    r2 = requests.post(f"{BACKEND}/report_text_detailed", json=payload, timeout=60)
+                    r2 = requests.post(f"{BACKEND_URL}/report_text_detailed", json=payload, timeout=60)
                     r2.raise_for_status()
                     st.session_state.quick_report_bytes = r2.content
                 except Exception:
@@ -1370,7 +1379,7 @@ elif TAB == "Text (Detailed)":
     st.session_state.setdefault("td_input", "")
     # guard: clear one-shot refresh flag if present
     if st.session_state.pop("_td_refresh_for_history", False):
-        pass  # nothing else; this just prevents duplicate toasts on rerun
+        pass  # prevents duplicate toasts on rerun
 
     with st.form("form_text_detailed", clear_on_submit=False):
         st.session_state.td_input = st.text_area(
@@ -1384,9 +1393,9 @@ elif TAB == "Text (Detailed)":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
+        # IMPORTANT: no 'key' here (Render's Streamlit rejects key= on form_submit_button)
         submit_td = st.form_submit_button(
             "Analyze (Detailed)",
-            key="td_analyze_btn",
             use_container_width=True,
             disabled=st.session_state.td_busy,
         )
@@ -1403,14 +1412,18 @@ elif TAB == "Text (Detailed)":
             try:
                 payload = {"text": st.session_state.td_input}
 
+                # Resolve backend URL safely: prefer env(API_BASE), else global BACKEND, else localhost
+                import os
+                BACKEND_URL = os.getenv("API_BASE") or (BACKEND if "BACKEND" in globals() else "http://127.0.0.1:8787")
+
                 status.write("Sending text to /analyze_text_detailed …")
-                r = requests.post(f"{BACKEND}/analyze_text_detailed", json=payload, timeout=90)
+                r = requests.post(f"{BACKEND_URL}/analyze_text_detailed", json=payload, timeout=90)
                 r.raise_for_status()
                 st.session_state.td_result = r.json()
 
                 status.write("Building printable report …")
                 try:
-                    r2 = requests.post(f"{BACKEND}/report_text_detailed", json=payload, timeout=90)
+                    r2 = requests.post(f"{BACKEND_URL}/report_text_detailed", json=payload, timeout=90)
                     r2.raise_for_status()
                     st.session_state.td_report_bytes = r2.content
                 except Exception:
@@ -1574,472 +1587,6 @@ elif TAB == "Text (Detailed)":
                           "prefill_text_detailed", "td_input"):
                     st.session_state.pop(k, None)
                 reset_and_rerun("Text (Detailed)")
-
-# =============================================================================
-# Tab: Upload PDF (Quick)
-# =============================================================================
-elif TAB == "Upload PDF":
-    st.markdown("### Upload PDF (Quick)")
-    status_placeholder = st.empty()
-
-    # --- tiny, local CSS ---
-    st.markdown("""
-    <style>
-      .cc-card{ border:1px solid #2a2f37; border-radius:12px; background:#0f131a; padding:12px 14px; margin:10px 0 12px 0; }
-      .cc-card .ttl{ font-weight:600; margin:0 0 8px 0; }
-      .cc-card .score{ font-size:12px; opacity:.85; margin-top:2px; }
-      .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; line-height:1; margin-right:8px; }
-      .badge.low    { background:#10331e; color:#61d092; border:1px solid #1a6c3f; }
-      .badge.medium { background:#2e2a12; color:#ffd166; border:1px solid #806b1a; }
-      .badge.high   { background:#3a1515; color:#ff7b7b; border:1px solid #8b1f1f; }
-      #pdfq-scope [data-testid="stExpander"] details{ border-radius:10px; border:1px solid #2a2f37; background:#0c1016; }
-      #pdfq-scope [data-testid="stExpander"] summary{ padding:10px 12px; }
-      #pdfq-scope [data-testid="stExpander"] div[role="region"]{ padding:8px 12px 12px; }
-      .chips span{ display:inline-block; padding:2px 8px; margin:2px 6px 2px 0; border:1px solid #2a2f37; background:#0f131a; border-radius:999px; font-size:12px; opacity:.9; }
-      /* NEW: tidy paragraph spacing for the summary so it isn’t a blob */
-      .cc-summary p { margin:0 0 10px 0; line-height:1.55; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-<style>
-/* Shared card look */
-.cc-card {
-  border:1px solid #2a2f37;
-  border-radius:12px;
-  background:#0f131a;
-  padding:14px 16px;
-  margin:12px 0 14px 0;
-  line-height:1.55;
-  font-size:14px;
-  color:#e4e6eb;
-}
-
-/* Headings inside cards */
-.cc-card .ttl,
-.cc-card .hdr {
-  font-weight:600;
-  font-size:15px;
-  margin:0 0 8px 0;
-  line-height:1.3;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-/* Risk badges unified across tabs */
-.badge {
-  display:inline-block;
-  padding:3px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:700;
-  line-height:1;
-  letter-spacing:.2px;
-}
-.badge.low {
-  background:#12351b;
-  color:#7ceca3;
-  border:1px solid #1f6137;
-}
-.badge.medium {
-  background:#2e2a13;
-  color:#ffd96c;
-  border:1px solid #705e1c;
-}
-.badge.high {
-  background:#3a1416;
-  color:#ff8b8b;
-  border:1px solid #6b1c21;
-}
-
-/* Score chip styling */
-.chip {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:8px;
-  border:1px solid #2a2f37;
-  font-size:12px;
-  opacity:.9;
-}
-
-/* Unified paragraph rhythm */
-.cc-card p {
-  margin:0 0 10px 0;
-  line-height:1.55;
-  text-align:justify;
-}
-
-/* Light touch for lists */
-.cc-card ul {
-  margin:6px 0 6px 18px;
-  padding:0;
-  line-height:1.55;
-}
-.cc-card li {
-  margin:2px 0;
-}
-
-/* Pills (tags / entities) */
-.chips span,
-.pill {
-  display:inline-block;
-  padding:4px 10px;
-  margin:4px 6px 0 0;
-  border:1px solid #2a2f37;
-  background:#10151e;
-  border-radius:999px;
-  font-size:12px;
-  opacity:.9;
-}
-
-/* Responsive grid for entity cards */
-.grid {
-  display:grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px,1fr));
-  gap:8px;
-}
-.kv {
-  border:1px solid #2a2f37;
-  border-radius:10px;
-  padding:8px 10px;
-}
-.kv .k { font-size:11px; opacity:.7; }
-.kv .v { font-size:13px; font-weight:600; margin-top:2px; }
-
-/* Sticky action area identical across tabs */
-.sticky-actions {
-  position:sticky;
-  bottom:0;
-  z-index:3;
-  background:#0e1117;
-  padding-top:8px;
-  margin-top:8px;
-  border-top:1px solid #2a2f37;
-}
-</style>
-""", unsafe_allow_html=True)
-    
-
-    # --- local helper: paragraphize summary (NEW) ---
-    def _qp_to_paragraphs(text: str | None) -> str:
-        """
-        Convert a flat summary string into <p> paragraphs.
-        First split on blank lines; if none, split on single line breaks.
-        """
-        import html as _html
-        t = (text or "").strip()
-        if not t:
-            return ""
-        parts = [p.strip() for p in t.replace("\r","").split("\n\n") if p.strip()]
-        if len(parts) <= 1:
-            parts = [p.strip() for p in t.split("\n") if p.strip()]
-        return "".join(f"<p>{_html.escape(p)}</p>" for p in parts)
-
-    # --- state ---
-    st.session_state.setdefault("pdfq_busy", False)
-    st.session_state.setdefault("pdfq_result", None)
-    st.session_state.setdefault("pdfq_report_bytes", None)
-    st.session_state.setdefault("pdfq_uploader_key", 0)
-    st.session_state.setdefault("pdfq_upload_bytes", b"")
-    # one-shot guard after forced rerun (prevents duplicate toasts)
-    if st.session_state.pop("_pdfq_refresh_for_history", False):
-        pass
-
-    with st.form("form_pdf_quick", clear_on_submit=False):
-        uploaded = st.file_uploader(
-            "Choose a PDF",
-            type=["pdf"],
-            key=f"pdfq_uploader_{st.session_state.pdfq_uploader_key}",
-            accept_multiple_files=False,
-            help="Text-based PDFs work best (OCR not enabled in MVP)."
-        )
-        submit_pdfq = st.form_submit_button(
-            "Analyze PDF",
-            use_container_width=True,
-            disabled=st.session_state.pdfq_busy,
-        )
-
-    if submit_pdfq:
-        lock_tab("Upload PDF")   # keep view on this tab
-        if not uploaded:
-            st.warning("Please upload a PDF file.")
-        else:
-            st.session_state.pdfq_busy = True
-            # ensure single status instance (fixes double grey box)
-            status_placeholder.empty()
-            status = status_placeholder.status("Analyzing PDF…", state="running", expanded=True)
-            t0 = time.perf_counter()
-            try:
-                # cache the raw bytes for size checks / later reuse
-                st.session_state.pdfq_upload_bytes = uploaded.getvalue()
-                file_tuple = (uploaded.name, st.session_state.pdfq_upload_bytes, "application/pdf")
-
-                status.write("Sending file to /analyze_pdf …")
-                r = requests.post(f"{BACKEND}/analyze_pdf", files={"file": file_tuple}, timeout=120)
-                r.raise_for_status()
-                res = r.json() or {}
-
-                # --- fallback for clauses/overall (skip for large files to keep Quick… quick) ---
-                size_bytes = len(st.session_state.get("pdfq_upload_bytes") or b"")
-                MAX_QUICK_FALLBACK_SIZE = 3_000_000  # ~3 MB
-
-                if not res.get("clauses") and size_bytes <= MAX_QUICK_FALLBACK_SIZE:
-                    try:
-                        status.write("Fetching clause breakdown from /analyze_pdf_detailed …")
-                        rd = requests.post(f"{BACKEND}/analyze_pdf_detailed", files={"file": file_tuple}, timeout=180)
-                        rd.raise_for_status()
-                        detailed = rd.json() or {}
-                        if detailed.get("clauses"):
-                            res["clauses"] = detailed["clauses"]
-                        if not res.get("overall") and detailed.get("overall"):
-                            res["overall"] = detailed["overall"]
-                    except Exception:
-                        pass
-
-                st.session_state.pdfq_result = res
-
-                status.write("Building printable report …")
-                try:
-                    r2 = requests.post(f"{BACKEND}/report_pdf_detailed", files={"file": file_tuple}, timeout=120)
-                    r2.raise_for_status()
-                    st.session_state.pdfq_report_bytes = r2.content
-                except Exception:
-                    st.session_state.pdfq_report_bytes = None
-
-                # ----- RECENT: add item + force sidebar refresh now -----
-                try:
-                    title = uploaded.name or "Upload PDF"
-                    add_history({
-                        "type": "pdf_quick",
-                        "title": title[:80],
-                        "payload": {"name": title, "size": size_bytes}
-                    })
-                    try:
-                        st.cache_data.clear()
-                    except Exception:
-                        pass
-                    st.session_state["recent_nonce"] = st.session_state.get("recent_nonce", 0) + 1
-                    st.session_state["_pdfq_refresh_for_history"] = True
-                    lock_tab("Upload PDF")
-                    st.rerun()
-                except Exception:
-                    pass
-                # --------------------------------------------------------
-
-                status.update(label=f"Done in {time.perf_counter()-t0:.1f}s ✓", state="complete")
-                st.caption(f"Done in {time.perf_counter()-t0:.1f}s ✓")
-            except requests.HTTPError as http_err:
-                resp = http_err.response
-                status.update(label="Analysis failed", state="error")
-                st.error(f"Error contacting backend: {getattr(resp, 'status_code', '')} {getattr(resp, 'reason', '')}")
-                try:
-                    st.caption((resp.text or "")[:400])
-                except Exception:
-                    pass
-                st.session_state.pdfq_result = None
-                st.session_state.pdfq_report_bytes = None
-            except Exception as e:
-                status.update(label="Analysis failed", state="error")
-                st.error(f"PDF analysis failed: {e}")
-                st.session_state.pdfq_result = None
-                st.session_state.pdfq_report_bytes = None
-            finally:
-                # clear status (prevents lingering second box)
-                status_placeholder.empty()
-                st.session_state.pdfq_busy = False
-
-    if st.session_state.pdfq_result:
-        res = st.session_state.pdfq_result or {}
-        overall = (res.get("overall") or {})
-        clauses = list(_get_clauses(res))
-
-        s_txt = _qp_pick_summary(res)  # NEW: prefer concise summary if available
-        if s_txt and s_txt != "—":
-            # CHANGED: use paragraphized summary (no blob)
-            st.markdown('<div class="cc-card cc-summary"><div class="ttl">Summary</div>', unsafe_allow_html=True)
-            st.markdown(_qp_to_paragraphs(s_txt), unsafe_allow_html=True)  # UPDATED: no blob
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Overall Risk (graceful empty reasons)
-        lvl = _level_str(overall.get("risk_level") or overall.get("level") or "—")
-        score = overall.get("risk_score", overall.get("score"))
-        reasons = overall.get("risk_reasons") or overall.get("reasons") or res.get("risk_reasons") or []
-        if reasons:
-            reasons_html = "<ul style='margin:8px 0 0 16px'>" + "".join(f"<li>{r}</li>" for r in reasons[:6]) + "</ul>"
-        else:
-            reasons_html = "<div class='cc-subtle'>No key risks extracted in quick mode.</div>"
-
-        st.markdown(f"""
-        <div class="cc-card">
-          <div class="ttl"><span class="badge {_badge_class(lvl)}">{lvl}</span> Overall Risk</div>
-          <div class="score">{'' if score in (None,'—') else f'Score {score}/100'}</div>
-          {reasons_html}
-        </div>
-        """, unsafe_allow_html=True)
-
-        # --- Compact snapshot with Detailed-style controls ---
-        def _one_liner(txt: str, n=240):
-            if not txt: return "—"
-            line = txt.strip().splitlines()[0]
-            return (line[:n] + "…") if len(line) > n else line
-
-        def _risk_score(c):
-            v = c.get("risk_score", c.get("score"))
-            try: return float(v)
-            except: return -1.0
-
-        clauses_all = list(clauses)
-
-        from collections import Counter
-        def _lev(c): return (c.get("risk_level") or c.get("level") or "low").lower()
-
-        show_controls = len(clauses_all) >= 5
-        if show_controls:
-            st.divider()
-            colA, colB, colC, colD = st.columns([2,1,1,1])
-            with colA:
-                q = st.text_input("Search clauses", key="pdfq_clause_query", placeholder="Label or text…")
-            with colB:
-                filt = st.selectbox("Show", ["All","High","Medium","Low"], key="pdfq_clause_filter")
-            with colC:
-                sort_mode = st.selectbox("Order", ["Document order","By risk (desc)"], key="pdfq_clause_sort")
-            with colD:
-                expand_all = st.checkbox("Expand all", key="pdfq_expand_all", value=False)
-
-            st.markdown("<div style='opacity:.75;font-size:12px;margin:-6px 0 6px'>Filter or search (Quick shows a 5-clause preview).</div>", unsafe_allow_html=True)
-
-            def keep_clause(c):
-                rl = _lev(c)
-                if filt != "All" and filt.lower() not in rl:
-                    return False
-                if q:
-                    blob = " ".join([
-                        str(c.get("label") or c.get("title") or ""),
-                        str(c.get("summary") or c.get("notes") or ""),
-                        str(c.get("text") or c.get("raw_text") or ""),
-                    ]).lower()
-                    return q.lower() in blob
-                return True
-
-            filtered = [c for c in clauses_all if keep_clause(c)]
-            if sort_mode == "By risk (desc)":
-                filtered = sorted(filtered, key=_risk_score, reverse=True)
-        else:
-            q, filt, sort_mode, expand_all = "", "All", "Document order", False
-            filtered = clauses_all
-            st.markdown("<div class='cc-subtle'>Quick view shows a 5-clause preview.</div>", unsafe_allow_html=True)
-
-        topN = 5
-        top_clauses = filtered[:topN]
-
-        full_ct = Counter(_lev(c) for c in clauses_all)
-        hi_all, md_all, lo_all = full_ct.get("high",0), full_ct.get("medium",0), full_ct.get("low",0)
-
-        fct = Counter(_lev(c) for c in filtered)
-        hi, md, lo = fct.get("high",0), fct.get("medium",0), fct.get("low",0)
-
-        st.markdown(
-            f"**Risk mix (filtered):** High {hi} · Medium {md} · Low {lo} — "
-            f"**Clauses:** {len(filtered)}/{len(clauses_all)}  "
-            f"<span style='opacity:.7'>(All: H {hi_all} · M {md_all} · L {lo_all})</span>",
-            unsafe_allow_html=True
-        )
-
-        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
-        st.markdown('<div id="pdfq-scope">', unsafe_allow_html=True)
-        col_left, col_right = st.columns([2,1], vertical_alignment="top")
-
-        with col_left:
-            st.markdown('<div class="cc-card"><div class="ttl">Top clauses (preview)</div><div id="pdfq-top">', unsafe_allow_html=True)
-            st.caption("Need the full clause-by-clause explorer? Use **Analyze in PDF (Detailed)**")
-            if not top_clauses:
-                st.markdown("<div class='cc-subtle'>No clause preview available in quick mode.</div>", unsafe_allow_html=True)
-            else:
-                for i, c in enumerate(top_clauses, 1):
-                    idx   = c.get("index", i) or i
-                    title = c.get("label") or c.get("title") or f"Clause {idx}"
-                    rlvl  = _level_str(c.get("risk_level") or c.get("level") or "—")
-                    sc    = c.get("risk_score", c.get("score"))
-
-                    head  = f"Clause {idx}: {title} — {rlvl}{_fmt_score(sc)}"
-                    expanded = expand_all or (isinstance(rlvl, str) and rlvl.lower().startswith("high"))
-
-                    with st.expander(head, expanded=expanded):
-                        one = _one_liner(c.get("summary") or c.get("notes") or c.get("text") or "")
-                        if one and one != "—":
-                            st.write("**In plain English:**", one)
-
-                        creasons = (c.get("risk_reasons") or c.get("reasons") or [])
-                        if creasons:
-                            st.caption("Why this matters:")
-                            for rr in creasons[:3]:
-                                st.write(f"• {rr}")
-
-                        ctext = (c.get("text") or c.get("raw_text") or "").strip()
-                        if ctext:
-                            with st.expander("Show clause text"):
-                                st.write(ctext)
-
-                        ents = c.get("entities") or []
-                        names = sorted({(e.get("text") or "").strip() for e in ents if isinstance(e, dict) and e.get("text")})
-                        if names:
-                            with st.expander(f"Entities ({len(names)})"):
-                                st.markdown('<div class="chips">' + " ".join(f"<span>{n}</span>" for n in names[:24]) + "</div>",
-                                            unsafe_allow_html=True)
-            st.markdown('</div></div>', unsafe_allow_html=True)
-
-        with col_right:
-            ents = res.get("entities") or []
-            dates = res.get("dates") or []
-            tags  = res.get("tags") or []
-
-            if ents:
-                names = sorted({(e.get("text") or "").strip() for e in ents if isinstance(e, dict) and (e.get("text") or "").strip()})
-                st.markdown(f'<div class="cc-card"><div class="ttl">Entities ({len(names)})</div>', unsafe_allow_html=True)
-                preview_names = names[:12]
-                st.markdown('<div class="chips">' + " ".join(f"<span>{n}</span>" for n in preview_names) + "</div>", unsafe_allow_html=True)
-                if len(names) > 12:
-                    with st.expander(f"Show all entities ({len(names)})"):
-                        st.markdown('<div class="chips">' + " ".join(f"<span>{n}</span>" for n in names) + "</div>", unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            if dates:
-                st.markdown('<div class="cc-card"><div class="ttl">Key Dates</div>', unsafe_allow_html=True)
-                for d in dates[:4]:
-                    label = d.get("label") or "Date"
-                    val   = d.get("value") or d.get("text") or ""
-                    st.write(f"- **{label}**: {val}")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            if tags:
-                st.markdown('<div class="cc-card"><div class="ttl">Tags</div>', unsafe_allow_html=True)
-                st.write(", ".join(tags[:12]))
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)  # close #pdfq-scope
-
-        st.divider()
-        col_dl, col_reset = st.columns([4,1], vertical_alignment="center")
-        with col_dl:
-            if st.session_state.get("pdfq_report_bytes"):
-                st.download_button(
-                    "⬇️ Download report (HTML)",
-                    data=st.session_state.pdfq_report_bytes,
-                    file_name="contract-report_pdf_quick.html",
-                    mime="text/html",
-                    key="pdfq_download_btn",
-                    use_container_width=True,
-                )
-        with col_reset:
-            if st.button("Reset", key="pdfq_reset_btn", help="Clear this result"):
-                lock_tab("Upload PDF")
-                for k in ("pdfq_result", "pdfq_summary", "pdfq_report_bytes", "pdfq_last_error", "pdfq_busy"):
-                    st.session_state.pop(k, None)
-                st.session_state["pdfq_uploader_key"] = st.session_state.get("pdfq_uploader_key", 0) + 1
-                reset_and_rerun("Upload PDF")  # remounts uploader cleanly
 
 # =============================================================================
 # Tab: PDF (Detailed)
@@ -2223,14 +1770,18 @@ elif TAB == "PDF (Detailed)":
                 st.session_state.pdfd_upload_bytes = pdf_file_d.getvalue()
                 file_tuple = (pdf_file_d.name, st.session_state.pdfd_upload_bytes, "application/pdf")
 
+                # Resolve backend URL safely: prefer env(API_BASE), else global BACKEND, else localhost
+                import os
+                BACKEND_URL = os.getenv("API_BASE") or (BACKEND if "BACKEND" in globals() else "http://127.0.0.1:8787")
+
                 status.write("Sending file to /analyze_pdf_detailed …")
-                r = requests.post(f"{BACKEND}/analyze_pdf_detailed", files={"file": file_tuple}, timeout=180)
+                r = requests.post(f"{BACKEND_URL}/analyze_pdf_detailed", files={"file": file_tuple}, timeout=180)
                 r.raise_for_status()
                 st.session_state.pdfd_result = r.json() or {}
 
                 status.write("Building printable report …")
                 try:
-                    r2 = requests.post(f"{BACKEND}/report_pdf_detailed", files={"file": file_tuple}, timeout=180)
+                    r2 = requests.post(f"{BACKEND_URL}/report_pdf_detailed", files={"file": file_tuple}, timeout=180)
                     r2.raise_for_status()
                     st.session_state.pdfd_report_bytes = r2.content
                 except Exception:
