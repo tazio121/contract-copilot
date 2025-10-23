@@ -1,5 +1,5 @@
 ﻿# =============================================================================
-# Contract Co-Pilot — Streamlit Frontend (Tab Persistence Fixed)
+# Contract Co-Pilot — Streamlit Frontend
 # =============================================================================
 from __future__ import annotations
 
@@ -12,9 +12,25 @@ import streamlit as st
 import streamlit.components.v1 as components
 from json import dumps
 
-API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
+# ---- Static/assets path -----------------------------------------------------
+from pathlib import Path
+ASSETS = Path(__file__).parent / "static"
 
-@st.cache_data(ttl=30)  # ping at most once every 30s per session
+# ---- Page settings (favicon + title + layout) -------------------------------
+st.set_page_config(
+    page_title="Contract Co-Pilot",
+    page_icon=str(ASSETS / "favicon-32.png"),  # your favicon file
+    layout="wide"
+)
+
+# ---- Sidebar logo -----------------------------------------------------------
+st.sidebar.image(str(ASSETS / "ccp-logo.png"), width=140)  # your logo
+
+# ---- Backend API URL (important fix!) ---------------------------------------
+API_BASE = os.getenv("API_BASE", "http://140.238.88.228:8787")
+
+# ---- Backend health ping ----------------------------------------------------
+@st.cache_data(ttl=30)
 def ping_backend() -> bool:
     try:
         r = requests.get(f"{API_BASE}/health", timeout=1.5)
