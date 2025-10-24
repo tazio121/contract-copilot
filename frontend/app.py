@@ -412,6 +412,45 @@ def _qp_to_paragraphs(text: str | None) -> str:
 # =============================================================================
 # Helpers — small utilities
 # =============================================================================
+
+
+# These are probably already in your file; keep your values if set elsewhere:
+API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8787"  # your FastAPI host/port
+STATIC_BASE = f"{API_BASE}/static"
+ASSETS = Path(__file__).parent / "static"
+AVATAR_DEFAULT = f"{STATIC_BASE}/avatars/ccp-white-blue.png"  # keep your existing default if different
+
+def _fmt_avatar(k: str):
+    v = AVATAR_CHOICES.get(k)
+    if isinstance(v, dict):
+        return v.get("label", k)
+    return k
+
+def _avatar_url(k: str):
+    """Return a URL or filesystem path that Streamlit can open."""
+    v = AVATAR_CHOICES.get(k)
+
+    # value can be dict or string
+    if isinstance(v, dict):
+        val = v.get("url") or v.get("path") or v.get("file") or ""
+    else:
+        val = v or ""
+
+    if not val:
+        return AVATAR_DEFAULT
+
+    # If already an absolute URL, use it as-is
+    if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
+        return val
+
+    # If it's just a filename, try local static folder first
+    candidate = ASSETS / "avatars" / val  # e.g. frontend/static/avatars/ccp-white-blue.png
+    if candidate.exists():
+        return str(candidate)
+
+    # Fallback to backend static route (served by FastAPI)
+    return f"{STATIC_BASE}/avatars/{val}"
+
 from datetime import datetime  # ensure present
 # (also ensure you have: import io, from typing import Optional, and components imported earlier)
 
@@ -2787,7 +2826,7 @@ elif TAB == "Profile":
         if st.button("Sign out", use_container_width=True):
             st.session_state.clear()
             st.rerun()
-            
+
 # =============================================================================
 # Footer
 # =============================================================================
