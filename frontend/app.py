@@ -1408,12 +1408,7 @@ if TAB == "Paste Text":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
-        submit_quick = st.form_submit_button(
-            "Analyze Text",
-            key="quick_analyze_btn",
-            use_container_width=True,
-            disabled=st.session_state.quick_busy,
-        )
+        submit_quick = st.form_submit_button("Analyze", type="primary", use_container_width=True)
 
     # ---- submit ----
     if submit_quick:
@@ -1632,14 +1627,9 @@ elif TAB == "Text (Detailed)":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
-        submit_td = st.form_submit_button(
-            "Analyze (Detailed)",
-            key="td_analyze_btn",
-            use_container_width=True,
-            disabled=st.session_state.td_busy,
-        )
+        submit_detailed = st.form_submit_button("Analyze (Detailed)", type="primary", use_container_width=True)
 
-    if submit_td:
+    if submit_detailed:
         lock_tab("Text (Detailed)")  # keep user on this tab throughout
         if not (st.session_state.td_input or "").strip():
             st.warning("Please paste some text.")
@@ -2717,27 +2707,67 @@ elif TAB == "PDF (Detailed)":
 # =============================================================================
 elif TAB == "Profile":
     st.markdown("### Profile")
-    prof = st.session_state.get("_profile") or load_profile()
-    col1, col2 = st.columns([1,2])
+
+    # Load + normalize profile
+    prof = (st.session_state.get("_profile") or load_profile() or {})
+    prof.setdefault("display_name", "Pilot")
+    prof.setdefault("email", "")
+    prof.setdefault("avatar_key", None)
+    prof.setdefault("show_reasons", True)
+    prof.setdefault("default_mode", "quick")
+
+    # Build avatar choices + safe fallback
+    choices_keys = list(AVATAR_CHOICES.keys())
+    saved_key = prof.get("avatar_key")
+    if not choices_keys:
+        st.warning("No avatars configured.")
+        choices_keys = [None]
+    if saved_key not in choices_keys:
+        saved_key = choices_keys[0]
+        prof["avatar_key"] = saved_key
+
+    # Format label for selectbox (supports dict or string values)
+    def _fmt_avatar(k: str):
+        v = AVATAR_CHOICES.get(k)
+        if isinstance(v, dict):
+            return v.get("label", k)
+        return k
+
+    # Resolve image url from mapping (dict or string) with fallback
+    def _avatar_url(k: str):
+        v = AVATAR_CHOICES.get(k)
+        if isinstance(v, dict):
+            return v.get("url") or AVATAR_DEFAULT
+        return v or AVATAR_DEFAULT
+
+    idx = choices_keys.index(saved_key) if saved_key in choices_keys else 0
+
+    col1, col2 = st.columns([1, 2])
     with col1:
-        avatar_key = st.selectbox("avatar", list(AVATAR_CHOICES.keys()),
-                                  index=list(AVATAR_CHOICES.keys()).index(prof["avatar_key"]))
-        st.image(AVATAR_CHOICES[avatar_key], width=96)
+        avatar_key = st.selectbox(
+            "Avatar",
+            options=choices_keys,
+            index=idx,
+            format_func=_fmt_avatar,
+        )
+        st.image(_avatar_url(avatar_key), width=96)
+
     with col2:
-        display_name = st.text_input("Display name", prof["display_name"])
-        email = st.text_input("Email", prof["email"], disabled=True)
+        display_name = st.text_input("Display name", prof.get("display_name", "Pilot"))
+        email = st.text_input("Email", prof.get("email", ""), disabled=True)
 
     st.markdown("---")
     st.subheader("Preferences")
-    mode = st.radio("Default analysis mode", ["Quick", "Detailed"],
-                    index=(0 if prof["default_mode"]=="quick" else 1), horizontal=True)
-    show_reasons = st.toggle("Show risk badges and reasons", value=prof["show_reasons"])
 
-    c1, c2, c3 = st.columns([1,1,1])
+    mode_idx = 0 if prof.get("default_mode", "quick") == "quick" else 1
+    mode = st.radio("Default analysis mode", ["Quick", "Detailed"], index=mode_idx, horizontal=True)
+    show_reasons = st.toggle("Show risk badges and reasons", value=bool(prof.get("show_reasons", True)))
+
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
         if st.button("Save preferences", use_container_width=True):
             newp = {
-                "display_name": display_name.strip() or "Pilot",
+                "display_name": (display_name or "Pilot").strip(),
                 "email": email,
                 "avatar_key": avatar_key,
                 "show_reasons": bool(show_reasons),
@@ -2746,17 +2776,18 @@ elif TAB == "Profile":
             save_profile(newp)
             st.session_state["_profile"] = newp
             st.success("Saved ✓")
+
     with c2:
         if st.button("Reset to defaults", use_container_width=True):
             save_profile({})
             st.session_state.pop("_profile", None)
             st.rerun()
+
     with c3:
         if st.button("Sign out", use_container_width=True):
-            # whatever your sign-out action is
             st.session_state.clear()
             st.rerun()
-
+            
 # =============================================================================
 # Footer
 # =============================================================================
