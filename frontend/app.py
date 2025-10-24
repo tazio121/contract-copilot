@@ -12,10 +12,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from json import dumps
 
-# ---- Page Setup --------------------------------------------------------------
-st.set_page_config(page_title="Contract Co-Pilot", page_icon="🧾", layout="centered")
-
-
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
 
 @st.cache_data(ttl=30)  # ping at most once every 30s per session
@@ -25,78 +21,9 @@ def ping_backend() -> bool:
         return r.ok
     except Exception:
         return False
-    
- # ==== History: load/save/toggle/delete/add ====================================
-from pathlib import Path
-HISTORY_PATH = Path("history.json")
 
-def load_history() -> list[dict]:
-    try:
-        return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-
-def _save_history(items: list[dict]) -> None:
-    try:
-        HISTORY_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-def add_history_entry(*, kind: str, title: str, payload: dict | str = None, meta: dict = None, fav: bool=False):
-    """Append one line to history and keep only the latest 100."""
-    items = st.session_state.get("history") or load_history()
-    from datetime import datetime
-    entry = {
-        "type": kind,                      # "text", "text_detailed", "pdf_quick", "pdf_detailed"
-        "title": (title or "Untitled").strip(),
-        "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),  # short ts for sidebar
-        "payload": payload if payload is not None else {},
-        "meta": meta or {},
-        "fav": bool(fav),
-    }
-    items.insert(0, entry)
-    items = items[:100]
-    st.session_state["history"] = items
-    _save_history(items)
-
-def toggle_fav(i: int):
-    items = st.session_state.get("history", [])
-    if 0 <= i < len(items):
-        items[i]["fav"] = not items[i].get("fav", False)
-        _save_history(items)
-
-def delete_history_item(i: int):
-    items = st.session_state.get("history", [])
-    if 0 <= i < len(items):
-        del items[i]
-        st.session_state["history"] = items
-        _save_history(items)
-
-# Ensure session has history loaded on first run
-st.session_state.setdefault("history", load_history())   
-
-# ---- Branding paths ----
-API_BASE = "http://140.238.88.228:8787"
-STATIC_BASE = f"{API_BASE}/static"
-LOGO_URL = f"{STATIC_BASE}/ccp-logo.png?v=1"
-AVATAR_DEFAULT = f"{STATIC_BASE}/avatars/ccp-white-blue.png"
-
-# Sidebar mini-logo CSS
-st.markdown(f"""
-<style>
-[data-testid="stSidebar"] {{
-  position: relative;
-}}
-[data-testid="stSidebar"]::before {{
-  content: "";
-  position: absolute;
-  top: 14px; left: 16px;
-  width: 28px; height: 28px;
-  background: url('{LOGO_URL}') no-repeat center/contain;
-  opacity: .95;
-}}
-</style>
-""", unsafe_allow_html=True)        
+# ---- Page Setup --------------------------------------------------------------
+st.set_page_config(page_title="Contract Co-Pilot", page_icon="🧾", layout="centered")
 
 
 # ---- One-shot rerun guard (global) ------------------------------------------
@@ -108,84 +35,6 @@ if st.session_state._do_rerun:
 # ---- Auth (matches your auth.py) --------------------------------------------
 from supa import get_supa
 from auth import render_auth_modal, get_user_id, bootstrap_session, sign_out
-
-
-
-# ---- Static/branding helpers --------------------------------------------------
-from pathlib import Path
-ASSETS = Path(__file__).parent / "static"  # local fallback, not required
-
-BACKEND_BASE = os.environ.get("BACKEND_BASE_URL", "http://127.0.0.1:8787").rstrip("/")
-LOGO_URL = f"{BACKEND_BASE}/static/ccp-logo.png"  # served by FastAPI
-FAVICON_URL = f"{BACKEND_BASE}/static/favicon-32.png"  # optional
-
-# Mini “memory” for profile + history (file-based so it survives restarts)
-STORE = Path.home() / ".contract-copilot"
-STORE.mkdir(exist_ok=True)
-PROFILE_FILE = STORE / "profile.json"
-HISTORY_FILE = STORE / "history.json"
-
-def _load_json(path: Path, default):
-    try:
-        return json.loads(path.read_text("utf-8"))
-    except Exception:
-        return default
-
-def _save_json(path: Path, data):
-    try:
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-def load_profile():
-    data = _load_json(PROFILE_FILE, {})
-    # sensible defaults
-    return {
-        "display_name": data.get("display_name", "New Pilot"),
-        "email": data.get("email", st.session_state.get("user_email", "")),
-        "avatar_key": data.get("avatar_key", "wp-black"),
-        "show_reasons": data.get("show_reasons", True),
-        "default_mode": data.get("default_mode", "quick"),  # quick|detailed
-    }
-
-def save_profile(p):
-    _save_json(PROFILE_FILE, p)
-
-def load_history():
-    h = _load_json(HISTORY_FILE, [])
-    # keep most recent first
-    return sorted(h, key=lambda x: x.get("ts",""), reverse=True)[:50]
-
-def add_history(entry: dict):
-    h = load_history()
-    h.insert(0, entry)  # newest first
-    # clamp to 50
-    h = h[:50]
-    _save_json(HISTORY_FILE, h)
-
-# Avatars you have in static/avatars/
-AVATAR_CHOICES = {
-    "wp-black":  f"{BACKEND_BASE}/static/avatars/wp-black.png",
-    "wp-white":  f"{BACKEND_BASE}/static/avatars/wp-white.png",
-    "wp-blue":   f"{BACKEND_BASE}/static/avatars/wp-blue.png",
-    # add more here as you upload them
-}
-
-# Sidebar mini icon (same approach as in the playbook UI notes)
-st.markdown(f"""
-<style>
-  .ccp-hero {{ text-align:center; margin:6px 0 8px 0; }}
-  .ccp-hero h1 {{ margin:0; line-height:1.1; }}
-  .ccp-hero .sub {{ color:#888; margin:4px 0 0 0; }}
-  [data-testid="stSidebar"] {{ position:relative; }}
-  [data-testid="stSidebar"]::before {{
-    content:""; position:absolute; top:12px; left:16px; width:20px; height:20px;
-    background-image:url('{LOGO_URL}');
-    background-size:contain; background-repeat:no-repeat; opacity:0.9;
-  }}
-  div[role="tablist"] {{ justify-content:center !important; }} /* center tabs */
-</style>
-""", unsafe_allow_html=True)
 
 # =============================================================================
 # Feature Gates / Popover Helper
@@ -412,73 +261,6 @@ def _qp_to_paragraphs(text: str | None) -> str:
 # =============================================================================
 # Helpers — small utilities
 # =============================================================================
-
-API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8787"
-STATIC_BASE = f"{API_BASE}/static"
-ASSETS = Path(__file__).parent / "static"
-AVATAR_DIR = ASSETS / "avatars"
-AVATAR_DEFAULT = str(AVATAR_DIR / "ccp-white-blue.png")  # local fallback
-
-def _avatar_url(k: str) -> str:
-    """Return an absolute path or URL usable by st.image()."""
-    v = AVATAR_CHOICES.get(k)
-    if isinstance(v, dict):
-        val = v.get("url") or v.get("path") or v.get("file") or ""
-    else:
-        val = v or ""
-
-    if not val:
-        return AVATAR_DEFAULT
-
-    # 1️⃣ Already an HTTP URL → use as-is
-    if val.startswith("http://") or val.startswith("https://"):
-        return val
-
-    # 2️⃣ Local file under static/avatars
-    local_path = AVATAR_DIR / val
-    if local_path.exists():
-        return str(local_path.resolve())     # ← absolute filesystem path
-
-    # 3️⃣ Fallback to backend static URL
-    return f"{STATIC_BASE}/avatars/{val}"
-
-# These are probably already in your file; keep your values if set elsewhere:
-API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8787"  # your FastAPI host/port
-STATIC_BASE = f"{API_BASE}/static"
-ASSETS = Path(__file__).parent / "static"
-AVATAR_DEFAULT = f"{STATIC_BASE}/avatars/ccp-white-blue.png"  # keep your existing default if different
-
-def _fmt_avatar(k: str):
-    v = AVATAR_CHOICES.get(k)
-    if isinstance(v, dict):
-        return v.get("label", k)
-    return k
-
-def _avatar_url(k: str):
-    """Return a URL or filesystem path that Streamlit can open."""
-    v = AVATAR_CHOICES.get(k)
-
-    # value can be dict or string
-    if isinstance(v, dict):
-        val = v.get("url") or v.get("path") or v.get("file") or ""
-    else:
-        val = v or ""
-
-    if not val:
-        return AVATAR_DEFAULT
-
-    # If already an absolute URL, use it as-is
-    if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
-        return val
-
-    # If it's just a filename, try local static folder first
-    candidate = ASSETS / "avatars" / val  # e.g. frontend/static/avatars/ccp-white-blue.png
-    if candidate.exists():
-        return str(candidate)
-
-    # Fallback to backend static route (served by FastAPI)
-    return f"{STATIC_BASE}/avatars/{val}"
-
 from datetime import datetime  # ensure present
 # (also ensure you have: import io, from typing import Optional, and components imported earlier)
 
@@ -1004,57 +786,22 @@ def delete_history_item(idx: int) -> None:
 # =============================================================================
 # Sidebar (account, pilot, recent)
 # =============================================================================
-
-# --- Avatar catalog + helpers (keep near top-level, before the sidebar) ---
-STATIC_BASE = "http://140.238.88.228:8501/static"  # served by FastAPI
-
-AVATAR_CHOICES = {
-    "white-blue":   "ccp-white-blue.png",
-    "white-red":    "ccp-white-red.png",
-    "white-yellow": "ccp-white-yellow.png",
-    "white-black":  "ccp-white-black.png",
-    "black-blue":   "ccp-black-blue.png",
-    "black-red":    "ccp-black-red.png",
-    "black-yellow": "ccp-black-yellow.png",
-    "black-white":  "ccp-black-white.png",
-}
-
-def avatar_url_from_choice(choice: str) -> str:
-    filename = AVATAR_CHOICES.get(choice) or AVATAR_CHOICES["white-blue"]
-    return f"{STATIC_BASE}/avatars/{filename}?v=2"
-
-def _prefs():
-    # Your existing prefs loader might already exist; keep this as a safe fallback
-    return st.session_state.get("_profile") or {"display_name": "New Pilot", "avatar_choice": "white-blue"}
-
-def load_history():
-    # Use your real history loader if you have one
-    return st.session_state.get("_recent_history", [])
-
-# --- Sidebar render ---
 with st.sidebar:
-    # SECTION: Account
     st.markdown('<div class="side-label">Account</div>', unsafe_allow_html=True)
     if st.button("Sign out", use_container_width=True, key="sidebar_signout_btn"):
         sign_out(_S)
         st.stop()
     st.markdown('<hr class="side-hr">', unsafe_allow_html=True)
 
-    # SECTION: Pilot (avatar + name)
     st.markdown('<div class="side-label">Pilot</div>', unsafe_allow_html=True)
-
-    prof = _prefs()
-    # Accept either avatar_choice or avatar_key from older saves
-    avatar_choice = prof.get("avatar_choice") or prof.get("avatar_key") or "white-blue"
-    pilot_name    = prof.get("display_name", "New Pilot")
-    avatar_url    = avatar_url_from_choice(avatar_choice)
-
+    _avatar = avatar_url_from_choice(_prefs().get("avatar_choice", "black-white"))
+    _name   = _prefs().get("display_name", "New Pilot")
     st.markdown(
         f"""
         <div class="side-pilot">
-          <img src="{avatar_url}" alt="avatar">
+          <img src="{_avatar}" alt="avatar">
           <div>
-            <div class="name">{pilot_name}</div>
+            <div class="name">{_name}</div>
             <div class="by">Created by Contract Co-Pilot</div>
           </div>
         </div>
@@ -1063,33 +810,12 @@ with st.sidebar:
     )
     st.markdown('<hr class="side-hr">', unsafe_allow_html=True)
 
-    # SECTION: Recent
     st.markdown('<div class="side-label">Recent</div>', unsafe_allow_html=True)
-    recent = load_history()
-    if not recent:
-        st.caption("No entries yet.")
-    else:
-        # render up to 10 items
-        for item in recent[:10]:
-            title = item.get("title", "(untitled)")
-            ts    = (item.get("ts","") or "")[:16].replace("T"," ")
-            st.markdown(f"• {title}  \n<small>{ts}</small>", unsafe_allow_html=True)
+    RECENT_BOX = st.empty()
 
 # =============================================================================
 # Sidebar — Recent entries (uses popover when available)
 # =============================================================================
-# Create the placeholder inside the sidebar and remember it for later updates
-with st.sidebar:
-    st.markdown('<div class="side-label">Recent</div>', unsafe_allow_html=True)
-    RECENT_BOX = st.empty()
-    st.session_state["RECENT_BOX"] = RECENT_BOX
-    # Ensure history list exists
-    st.session_state.setdefault("history", [])
-
-# Safely get the placeholder outside the sidebar (e.g., during reruns)
-RECENT_BOX = st.session_state.get("RECENT_BOX") or st.sidebar.empty()
-
-
 def _recent_type_label(t: str) -> str:
     t = (t or "").lower()
     return {
@@ -1099,7 +825,6 @@ def _recent_type_label(t: str) -> str:
         "pdf": "PDF",                    # legacy/compat
         "pdf_detailed": "PDF (Detailed)",
     }.get(t, (t or "Item").title())
-
 
 def _render_recent_menu(i: int, t: str, title: str, e: dict) -> None:
     # --- OPEN (tab-specific actions) ---
@@ -1192,7 +917,6 @@ def _render_recent_menu(i: int, t: str, title: str, e: dict) -> None:
             st.warning("Couldn't delete.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def render_recent_sidebar(box):
     st.session_state.setdefault("menu_idx", -1)
     entries = st.session_state.get("history", [])
@@ -1259,7 +983,6 @@ def render_recent_sidebar(box):
             except Exception:
                 pass
             st.rerun()
-
 
 # Render sidebar list
 render_recent_sidebar(RECENT_BOX)
@@ -1459,8 +1182,6 @@ if TAB == "Paste Text":
     st.session_state.setdefault("quick_busy", False)
     st.session_state.setdefault("quick_result", None)
     st.session_state.setdefault("quick_report_bytes", None)
-    # history de-dupe guard (lives only this session; avoids double add on rerun)
-    st.session_state.setdefault("_history_guard", set())
 
     # ---- form ----
     with st.form("form_text_quick", clear_on_submit=False):
@@ -1475,7 +1196,12 @@ if TAB == "Paste Text":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
-        submit_quick = st.form_submit_button("Analyze", type="primary", use_container_width=True)
+        submit_quick = st.form_submit_button(
+            "Analyze Text",
+            key="quick_analyze_btn",
+            use_container_width=True,
+            disabled=st.session_state.quick_busy,
+        )
 
     # ---- submit ----
     if submit_quick:
@@ -1503,52 +1229,16 @@ if TAB == "Paste Text":
                 except Exception:
                     st.session_state.quick_report_bytes = None
 
-                # ---- Push to history (success only, before rerun) ----
-                hist_id = f"text-{int(time.time())}"
-                if hist_id not in st.session_state._history_guard:
-                    title_txt = (st.session_state.quick_input[:60] + "…") if st.session_state.quick_input else "Text"
-
-                    # NEW: standard history entry (persists to history.json)
-                    try:
-                        if "add_history_entry" in globals():
-                            # Prefer a reasonable title from result if present
-                            _title_from_result = None
-                            if isinstance(st.session_state.quick_result, dict):
-                                _title_from_result = (
-                                    st.session_state.quick_result.get("overall", {}).get("title")
-                                    or st.session_state.quick_result.get("title")
-                                )
-                            add_history_entry(
-                                kind="text",
-                                title=_title_from_result or title_txt or "Quick text analysis",
-                                payload={"result": st.session_state.get("quick_result")},
-                                meta={"report": bool(st.session_state.get("quick_report_bytes"))} if "meta" in add_history_entry.__code__.co_varnames else None  # safe if meta not supported
-                            )
-                    except Exception:
-                        pass
-
-                    # EXISTING: legacy/local history paths (kept intact)
-                    try:
-                        if "add_history_item" in globals():
-                            add_history_item(
-                                entry_type="text",
-                                title=title_txt,
-                                payload=st.session_state.get("quick_result"),
-                                meta={"report": bool(st.session_state.get("quick_report_bytes"))},
-                            )
-                        else:
-                            # fallback to a simpler local history function if present
-                            if "add_history" in globals():
-                                add_history({
-                                    "id": hist_id,
-                                    "kind": "text",
-                                    "title": title_txt,
-                                    "ts": datetime.utcnow().isoformat()
-                                })
-                    except Exception:
-                        pass
-
-                    st.session_state._history_guard.add(hist_id)
+                # Push to history
+                try:
+                    add_history_item(
+                        entry_type="text",
+                        title=(st.session_state.quick_input[:60] + "…") if st.session_state.quick_input else "Text",
+                        payload=st.session_state.get("quick_result"),
+                        meta={"report": bool(st.session_state.get("quick_report_bytes"))},
+                    )
+                except Exception:
+                    pass
 
                 # Schedule a visible toast on the next run (so rerun won't clear it)
                 st.session_state["_select_tab"] = "Paste Text"
@@ -1665,9 +1355,8 @@ if TAB == "Paste Text":
                         st.session_state.pop(k, None)
                     reset_and_rerun("Paste Text")
             st.markdown('</div>', unsafe_allow_html=True)
-
-# ============================================================
-# =================
+            
+# =============================================================================
 # Tab: Text (Detailed)
 # =============================================================================
 elif TAB == "Text (Detailed)":
@@ -1679,8 +1368,9 @@ elif TAB == "Text (Detailed)":
     st.session_state.setdefault("td_result", None)
     st.session_state.setdefault("td_report_bytes", None)
     st.session_state.setdefault("td_input", "")
-    # de-dupe guard for history across immediate reruns
-    st.session_state.setdefault("_history_guard", set())
+    # guard: clear one-shot refresh flag if present
+    if st.session_state.pop("_td_refresh_for_history", False):
+        pass  # nothing else; this just prevents duplicate toasts on rerun
 
     with st.form("form_text_detailed", clear_on_submit=False):
         st.session_state.td_input = st.text_area(
@@ -1694,9 +1384,14 @@ elif TAB == "Text (Detailed)":
         st.caption(f"{count} / {MAX_CHARS} characters")
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
-        submit_detailed = st.form_submit_button("Analyze (Detailed)", type="primary", use_container_width=True)
+        submit_td = st.form_submit_button(
+            "Analyze (Detailed)",
+            key="td_analyze_btn",
+            use_container_width=True,
+            disabled=st.session_state.td_busy,
+        )
 
-    if submit_detailed:
+    if submit_td:
         lock_tab("Text (Detailed)")  # keep user on this tab throughout
         if not (st.session_state.td_input or "").strip():
             st.warning("Please paste some text.")
@@ -1721,70 +1416,28 @@ elif TAB == "Text (Detailed)":
                 except Exception:
                     st.session_state.td_report_bytes = None
 
-                # --- record in Recent (success only, before rerun) ---
+                # --- record in Recent (sidebar) ---
                 full_text = st.session_state.td_input or ""
                 first_line = (full_text.splitlines() or [""])[0].strip()
                 safe_title = first_line if first_line else "Text (Detailed)"
                 title = (safe_title[:60] + ("…" if len(safe_title) > 60 else ""))
-
-                hist_id = f"td-{int(time.time())}"
-                if hist_id not in st.session_state._history_guard:
-                    # NEW: standard history entry (persists to history.json)
-                    try:
-                        if "add_history_entry" in globals():
-                            _overall_title = None
-                            _clauses_count = 0
-                            try:
-                                _overall_title = ((st.session_state.td_result or {}).get("overall", {}) or {}).get("title")
-                                _clauses_count = len(_get_clauses(st.session_state.td_result or {}))
-                            except Exception:
-                                pass
-                            add_history_entry(
-                                kind="text_detailed",
-                                title=_overall_title or title or "Text (Detailed)",
-                                payload={"result": st.session_state.get("td_result")},
-                                meta={
-                                    "report": bool(st.session_state.get("td_report_bytes")),
-                                    "clauses": _clauses_count,
-                                } if "meta" in add_history_entry.__code__.co_varnames else None  # safe if meta not supported
-                            )
-                    except Exception:
-                        pass
-
-                    # EXISTING: legacy/local history paths (kept intact)
-                    try:
-                        if "add_history_item" in globals():
-                            add_history_item(
-                                entry_type="text_detailed",
-                                title=title,
-                                payload=st.session_state.get("td_result"),
-                                meta={
-                                    "report": bool(st.session_state.get("td_report_bytes")),
-                                    "clauses": len(_get_clauses(st.session_state.td_result or {})),
-                                },
-                            )
-                        elif "add_history" in globals():
-                            add_history({
-                                "id": hist_id,
-                                "kind": "text_detailed",
-                                "title": title,
-                                "ts": datetime.utcnow().isoformat()
-                            })
-                    except Exception:
-                        pass
-                    st.session_state._history_guard.add(hist_id)
-
-                # Prepare toast + tab persistence, then rerun
-                st.session_state["_select_tab"] = "Text (Detailed)"
-                st.session_state["__toast_next"] = {
-                    "msg": "Detailed analysis ready ✓",
-                    "icon": "✅",
-                    "ms": 5000
-                }
+                try:
+                    add_history({
+                        "type": "text_detailed",
+                        "title": title,
+                        "payload": full_text
+                    })
+                    # force sidebar to refresh immediately without losing results
+                    st.session_state["_td_refresh_for_history"] = True
+                    lock_tab("Text (Detailed)")
+                    st.rerun()
+                except Exception:
+                    # non-fatal if history service isn't available
+                    pass
 
                 elapsed = time.perf_counter() - t0
                 status.update(label=f"Done in {elapsed:.1f}s ✓", state="complete")
-                st.rerun()
+                st.toast("Detailed analysis ready ✓", icon="✅")
 
             except requests.HTTPError as http_err:
                 resp = http_err.response
@@ -1943,6 +1596,7 @@ elif TAB == "Upload PDF":
       #pdfq-scope [data-testid="stExpander"] summary{ padding:10px 12px; }
       #pdfq-scope [data-testid="stExpander"] div[role="region"]{ padding:8px 12px 12px; }
       .chips span{ display:inline-block; padding:2px 8px; margin:2px 6px 2px 0; border:1px solid #2a2f37; background:#0f131a; border-radius:999px; font-size:12px; opacity:.9; }
+      /* NEW: tidy paragraph spacing for the summary so it isn’t a blob */
       .cc-summary p { margin:0 0 10px 0; line-height:1.55; }
     </style>
     """, unsafe_allow_html=True)
@@ -2066,6 +1720,7 @@ elif TAB == "Upload PDF":
 }
 </style>
 """, unsafe_allow_html=True)
+    
 
     # --- local helper: paragraphize summary (NEW) ---
     def _qp_to_paragraphs(text: str | None) -> str:
@@ -2088,7 +1743,6 @@ elif TAB == "Upload PDF":
     st.session_state.setdefault("pdfq_report_bytes", None)
     st.session_state.setdefault("pdfq_uploader_key", 0)
     st.session_state.setdefault("pdfq_upload_bytes", b"")
-    st.session_state.setdefault("_history_guard", set())  # guard for rerun duplicates
     # one-shot guard after forced rerun (prevents duplicate toasts)
     if st.session_state.pop("_pdfq_refresh_for_history", False):
         pass
@@ -2154,57 +1808,28 @@ elif TAB == "Upload PDF":
                 except Exception:
                     st.session_state.pdfq_report_bytes = None
 
-                # ----- RECENT: add item (success only, before rerun; de-duped) -----
-                title = uploaded.name or "Upload PDF"
-                hist_id = f"pdfq-{int(time.time())}"
-                if hist_id not in st.session_state._history_guard:
-                    # NEW: standard history entry (persists to history.json)
+                # ----- RECENT: add item + force sidebar refresh now -----
+                try:
+                    title = uploaded.name or "Upload PDF"
+                    add_history({
+                        "type": "pdf_quick",
+                        "title": title[:80],
+                        "payload": {"name": title, "size": size_bytes}
+                    })
                     try:
-                        if "add_history_entry" in globals():
-                            add_history_entry(
-                                kind="pdf_quick",
-                                title=(title[:80] if title else "PDF (Quick)"),
-                                payload={"result": st.session_state.get("pdfq_result")},
-                                meta={
-                                    "name": title,
-                                    "size": len(st.session_state.get("pdfq_upload_bytes") or b""),
-                                    "report": bool(st.session_state.get("pdfq_report_bytes")),
-                                } if "meta" in add_history_entry.__code__.co_varnames else None  # safe if meta not supported
-                            )
+                        st.cache_data.clear()
                     except Exception:
                         pass
+                    st.session_state["recent_nonce"] = st.session_state.get("recent_nonce", 0) + 1
+                    st.session_state["_pdfq_refresh_for_history"] = True
+                    lock_tab("Upload PDF")
+                    st.rerun()
+                except Exception:
+                    pass
+                # --------------------------------------------------------
 
-                    # EXISTING: legacy/local history paths (kept intact)
-                    try:
-                        if "add_history_item" in globals():
-                            add_history_item(
-                                entry_type="pdf_quick",
-                                title=title[:80],
-                                payload=st.session_state.get("pdfq_result"),
-                                meta={
-                                    "name": title,
-                                    "size": len(st.session_state.get("pdfq_upload_bytes") or b""),
-                                    "report": bool(st.session_state.get("pdfq_report_bytes")),
-                                },
-                            )
-                        elif "add_history" in globals():
-                            add_history({
-                                "id": hist_id,
-                                "kind": "pdf_quick",
-                                "title": title[:80],
-                                "ts": datetime.utcnow().isoformat()
-                            })
-                    except Exception:
-                        pass
-                    st.session_state._history_guard.add(hist_id)
-
-                # stay on tab + rerun so sidebar refreshes
-                st.session_state["_select_tab"] = "Upload PDF"
                 status.update(label=f"Done in {time.perf_counter()-t0:.1f}s ✓", state="complete")
-                status_placeholder.empty()
                 st.caption(f"Done in {time.perf_counter()-t0:.1f}s ✓")
-                st.rerun()
-
             except requests.HTTPError as http_err:
                 resp = http_err.response
                 status.update(label="Analysis failed", state="error")
@@ -2230,11 +1855,11 @@ elif TAB == "Upload PDF":
         overall = (res.get("overall") or {})
         clauses = list(_get_clauses(res))
 
-        s_txt = _qp_pick_summary(res)  # prefer concise summary if available
+        s_txt = _qp_pick_summary(res)  # NEW: prefer concise summary if available
         if s_txt and s_txt != "—":
-            # paragraphized summary (no blob)
+            # CHANGED: use paragraphized summary (no blob)
             st.markdown('<div class="cc-card cc-summary"><div class="ttl">Summary</div>', unsafe_allow_html=True)
-            st.markdown(_qp_to_paragraphs(s_txt), unsafe_allow_html=True)
+            st.markdown(_qp_to_paragraphs(s_txt), unsafe_allow_html=True)  # UPDATED: no blob
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Overall Risk (graceful empty reasons)
@@ -2478,37 +2103,85 @@ elif TAB == "PDF (Detailed)":
   line-height:1;
   letter-spacing:.2px;
 }
-.badge.low { background:#12351b; color:#7ceca3; border:1px solid #1f6137; }
-.badge.medium { background:#2e2a13; color:#ffd96c; border:1px solid #705e1c; }
-.badge.high { background:#3a1416; color:#ff8b8b; border:1px solid #6b1c21; }
+.badge.low {
+  background:#12351b;
+  color:#7ceca3;
+  border:1px solid #1f6137;
+}
+.badge.medium {
+  background:#2e2a13;
+  color:#ffd96c;
+  border:1px solid #705e1c;
+}
+.badge.high {
+  background:#3a1416;
+  color:#ff8b8b;
+  border:1px solid #6b1c21;
+}
 
 /* Score chip styling */
-.chip { display:inline-block; padding:2px 8px; border-radius:8px; border:1px solid #2a2f37; font-size:12px; opacity:.9; }
+.chip {
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:8px;
+  border:1px solid #2a2f37;
+  font-size:12px;
+  opacity:.9;
+}
 
 /* Unified paragraph rhythm */
-.cc-card p { margin:0 0 10px 0; line-height:1.55; text-align:justify; }
+.cc-card p {
+  margin:0 0 10px 0;
+  line-height:1.55;
+  text-align:justify;
+}
 
 /* Light touch for lists */
-.cc-card ul { margin:6px 0 6px 18px; padding:0; line-height:1.55; }
-.cc-card li { margin:2px 0; }
+.cc-card ul {
+  margin:6px 0 6px 18px;
+  padding:0;
+  line-height:1.55;
+}
+.cc-card li {
+  margin:2px 0;
+}
 
 /* Pills (tags / entities) */
-.chips span, .pill {
-  display:inline-block; padding:4px 10px; margin:4px 6px 0 0;
-  border:1px solid #2a2f37; background:#10151e; border-radius:999px;
-  font-size:12px; opacity:.9;
+.chips span,
+.pill {
+  display:inline-block;
+  padding:4px 10px;
+  margin:4px 6px 0 0;
+  border:1px solid #2a2f37;
+  background:#10151e;
+  border-radius:999px;
+  font-size:12px;
+  opacity:.9;
 }
 
 /* Responsive grid for entity cards */
-.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap:8px; }
-.kv { border:1px solid #2a2f37; border-radius:10px; padding:8px 10px; }
+.grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px,1fr));
+  gap:8px;
+}
+.kv {
+  border:1px solid #2a2f37;
+  border-radius:10px;
+  padding:8px 10px;
+}
 .kv .k { font-size:11px; opacity:.7; }
 .kv .v { font-size:13px; font-weight:600; margin-top:2px; }
 
 /* Sticky action area identical across tabs */
 .sticky-actions {
-  position:sticky; bottom:0; z-index:3; background:#0e1117;
-  padding-top:8px; margin-top:8px; border-top:1px solid #2a2f37;
+  position:sticky;
+  bottom:0;
+  z-index:3;
+  background:#0e1117;
+  padding-top:8px;
+  margin-top:8px;
+  border-top:1px solid #2a2f37;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -2518,7 +2191,6 @@ elif TAB == "PDF (Detailed)":
     st.session_state.setdefault("pdfd_result", None)
     st.session_state.setdefault("pdfd_report_bytes", None)
     st.session_state.setdefault("pdfd_upload_bytes", b"")
-    st.session_state.setdefault("_history_guard", set())  # de-dupe across reruns
     # one-shot refresh guard for RECENT cache-bust rerun
     if st.session_state.pop("_pdfd_refresh_for_history", False):
         pass
@@ -2542,7 +2214,8 @@ elif TAB == "PDF (Detailed)":
             st.warning("Please upload a PDF file.")
         else:
             st.session_state.pdfd_busy = True
-            status_placeholder.empty()  # ensure single status instance
+            # ensure single status instance (prevents double box)
+            status_placeholder.empty()
             status = status_placeholder.status("Analyzing…", state="running", expanded=True)
             t0 = time.perf_counter()
             try:
@@ -2563,50 +2236,30 @@ elif TAB == "PDF (Detailed)":
                 except Exception:
                     st.session_state.pdfd_report_bytes = None
 
-                # --------- RECENT entry (success only, before rerun; de-duped) ----------
-                title = (pdf_file_d.name or "PDF (Detailed)")[:80]
-                hist_id = f"pdfd-{int(time.time())}"
-                if hist_id not in st.session_state._history_guard:
-                    try:
-                        if "add_history_item" in globals():
-                            add_history_item(
-                                entry_type="pdf_detailed",
-                                title=title,
-                                payload=st.session_state.get("pdfd_result"),
-                                meta={
-                                    "name": pdf_file_d.name,
-                                    "size": len(st.session_state.get("pdfd_upload_bytes") or b""),
-                                    "report": bool(st.session_state.get("pdfd_report_bytes")),
-                                    "clauses": len(_get_clauses(st.session_state.pdfd_result or {})),
-                                },
-                            )
-                        elif "add_history" in globals():
-                            add_history({
-                                "id": hist_id,
-                                "kind": "pdf_detailed",
-                                "title": title,
-                                "ts": datetime.utcnow().isoformat()
-                            })
-                    except Exception:
-                        pass
-                    st.session_state._history_guard.add(hist_id)
+                # --------- RECENT entry + instant sidebar refresh ----------
+                try:
+                    add_history({
+                        "type": "pdf_detailed",
+                        "title": (pdf_file_d.name or "PDF (Detailed)")[:80],
+                        "payload": st.session_state.get("pdfd_result") or {},
+                    })
+                    try: st.cache_data.clear()
+                    except Exception: pass
+                    st.session_state["recent_nonce"] = st.session_state.get("recent_nonce", 0) + 1
+                    st.session_state["_pdfd_refresh_for_history"] = True
+                    lock_tab("PDF (Detailed)")
+                    st.rerun()
+                except Exception:
+                    pass
+                # -----------------------------------------------------------
 
-                # keep user on tab, refresh sidebar, then rerun
-                st.session_state["_select_tab"] = "PDF (Detailed)"
-                elapsed = time.perf_counter() - t0
-                status.update(label=f"Done in {elapsed:.1f}s ✓", state="complete")
-                status_placeholder.empty()
-                st.caption(f"Done in {elapsed:.1f}s ✓")
-                st.rerun()
-
+                status.update(label=f"Done in {time.perf_counter()-t0:.1f}s ✓", state="complete")
             except requests.HTTPError as http_err:
                 resp = http_err.response
                 status.update(label="Analysis failed", state="error")
                 st.error(f"Error contacting backend: {getattr(resp, 'status_code', '')} {getattr(resp, 'reason', '')}")
-                try:
-                    st.caption((resp.text or "")[:400])
-                except Exception:
-                    pass
+                try: st.caption((resp.text or "")[:400])
+                except Exception: pass
                 st.session_state.pdfd_result = None
                 st.session_state.pdfd_report_bytes = None
             except Exception as e:
@@ -2634,10 +2287,10 @@ elif TAB == "PDF (Detailed)":
         clauses = list(_get_clauses(res))
 
         # Summary
-        s_txt = _qp_pick_summary(res)  # prefers detailed, rejects preamble
+        s_txt = _qp_pick_summary(res)  # <- NEW chooser that prefers Detailed, rejects preamble
         if s_txt and s_txt != "—":
             st.markdown('<div class="cc-card cc-summary"><div class="ttl">Summary</div>', unsafe_allow_html=True)
-            st.markdown(_qp_to_paragraphs(s_txt), unsafe_allow_html=True)
+            st.markdown(_qp_to_paragraphs(s_txt), unsafe_allow_html=True)  # <- aggressive paragraphizer
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Overall Risk
@@ -2768,92 +2421,127 @@ elif TAB == "PDF (Detailed)":
                         st.session_state.pop(k, None)
                     reset_and_rerun("PDF (Detailed)")
             st.markdown('</div>', unsafe_allow_html=True)
-            
+
 # =============================================================================
 # Tab: Profile
 # =============================================================================
 elif TAB == "Profile":
-    st.markdown("### Profile")
+    st.markdown('<h2 style="text-align:center;margin:0;">Profile</h2>', unsafe_allow_html=True)
 
-    # Load + normalize profile
-    prof = (st.session_state.get("_profile") or load_profile() or {})
-    prof.setdefault("display_name", "Pilot")
-    prof.setdefault("email", "")
-    prof.setdefault("avatar_key", None)
-    prof.setdefault("show_reasons", True)
-    prof.setdefault("default_mode", "quick")
+    st.session_state.setdefault("prefs", _prefs())
+    user_email = st.session_state.get("supa_session", {}).get("user", {}).get("email", "") or "—"
+    prefs = st.session_state["prefs"]
 
-    # Build avatar choices + safe fallback
-    choices_keys = list(AVATAR_CHOICES.keys())
-    saved_key = prof.get("avatar_key")
-    if not choices_keys:
-        st.warning("No avatars configured.")
-        choices_keys = [None]
-    if saved_key not in choices_keys:
-        saved_key = choices_keys[0]
-        prof["avatar_key"] = saved_key
+    st.markdown("""
+    <style>
+      .avatar-stack [data-baseweb="select"] { margin-top: -6px; }
+      .prefs-left { max-width: 520px; margin-left: 0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Format label for selectbox (supports dict or string values)
-    def _fmt_avatar(k: str):
-        v = AVATAR_CHOICES.get(k)
-        if isinstance(v, dict):
-            return v.get("label", k)
-        return k
+    colA, colB = st.columns([1, 3], vertical_alignment="top")
 
-    # Resolve image url from mapping (dict or string) with fallback
-    def _avatar_url(k: str):
-        v = AVATAR_CHOICES.get(k)
-        if isinstance(v, dict):
-            return v.get("url") or AVATAR_DEFAULT
-        return v or AVATAR_DEFAULT
+    with colA:
+        labels = [label for _, label in AVATAR_CHOICES]
+        slugs  = [slug  for slug, _ in AVATAR_CHOICES]
+        current_slug = prefs.get("avatar_choice", "black-white")
+        try:
+            start_index = slugs.index(current_slug)
+        except ValueError:
+            start_index = 0
 
-    idx = choices_keys.index(saved_key) if saved_key in choices_keys else 0
-
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        avatar_key = st.selectbox(
-            "Avatar",
-            options=choices_keys,
-            index=idx,
-            format_func=_fmt_avatar,
+        st.markdown('<div class="avatar-stack">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div style="display:flex; justify-content:center;">
+                <img src="{avatar_url_from_choice(current_slug)}" width="96" alt="avatar">
+            </div>
+            """,
+            unsafe_allow_html=True
         )
-        st.image(_avatar_url(avatar_key), width=96)
+        picked_label = st.selectbox(
+            "Choose your avatar",
+            labels,
+            index=start_index,
+            label_visibility="collapsed",
+            key="avatar_choice_select",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with col2:
-        display_name = st.text_input("Display name", prof.get("display_name", "Pilot"))
-        email = st.text_input("Email", prof.get("email", ""), disabled=True)
+        picked_slug = slugs[labels.index(picked_label)]
+        if picked_slug != current_slug:
+            prefs["avatar_choice"] = picked_slug
+            try:
+                _save_prefs(prefs)
+                st.session_state["prefs"] = prefs
+                st.toast("Avatar updated")
+            except Exception:
+                st.warning("Couldn't save avatar preference.")
 
-    st.markdown("---")
-    st.subheader("Preferences")
+    with colB:
+        new_display_name = st.text_input(
+            "Display name",
+            value=prefs.get("display_name", "New Pilot"),
+            key="profile_display_name_input",
+        )
+        st.text_input("Email", value=user_email, disabled=True, key="profile_email_display")
 
-    mode_idx = 0 if prof.get("default_mode", "quick") == "quick" else 1
-    mode = st.radio("Default analysis mode", ["Quick", "Detailed"], index=mode_idx, horizontal=True)
-    show_reasons = st.toggle("Show risk badges and reasons", value=bool(prof.get("show_reasons", True)))
+    st.markdown('<div class="prefs-left">', unsafe_allow_html=True)
+    st.divider()
+    st.markdown("### Preferences")
+
+    default_mode_index = 0 if prefs.get("default_mode") == "Quick" else 1
+    new_default_mode = st.radio(
+        "Default analysis mode",
+        ["Quick", "Detailed"],
+        index=default_mode_index,
+        horizontal=True,
+        key="profile_default_mode_radio",
+    )
+
+    new_risk_badges = st.toggle(
+        "Show risk badges and reasons",
+        value=bool(prefs.get("risk_badges", True)),
+        key="profile_risk_badges_toggle",
+    )
 
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        if st.button("Save preferences", use_container_width=True):
-            newp = {
-                "display_name": (display_name or "Pilot").strip(),
-                "email": email,
-                "avatar_key": avatar_key,
-                "show_reasons": bool(show_reasons),
-                "default_mode": "quick" if mode == "Quick" else "detailed",
-            }
-            save_profile(newp)
-            st.session_state["_profile"] = newp
-            st.success("Saved ✓")
+        if st.button("Save preferences", type="primary", use_container_width=True, key="profile_save_btn"):
+            prefs["display_name"] = (new_display_name or "").strip() or "New Pilot"
+            prefs["default_mode"] = new_default_mode
+            prefs["risk_badges"]  = bool(new_risk_badges)
+            try:
+                _save_prefs(prefs)
+                st.session_state["prefs"] = prefs
+                st.success("Preferences saved")
+            except Exception:
+                st.error("Couldn't save preferences.")
 
     with c2:
-        if st.button("Reset to defaults", use_container_width=True):
-            save_profile({})
-            st.session_state.pop("_profile", None)
-            st.rerun()
+        if st.button("Reset to defaults", use_container_width=True, key="profile_reset_btn"):
+            defaults = {
+                "display_name":  "New Pilot",
+                "default_mode":  "Quick",
+                "risk_badges":   True,
+                "avatar_choice": prefs.get("avatar_choice", "black-white"),
+            }
+            try:
+                _save_prefs(defaults)
+                st.session_state["prefs"] = defaults
+                st.success("Preferences reset")
+                st.rerun()
+            except Exception:
+                st.error("Couldn't reset preferences.")
 
     with c3:
-        if st.button("Sign out", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+        if st.button("Sign out", use_container_width=True, key="profile_sign_out_btn"):
+            try:
+                sign_out(_S)
+            finally:
+                st.stop()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # =============================================================================
 # Footer
