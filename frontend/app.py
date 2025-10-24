@@ -7,12 +7,26 @@ from __future__ import annotations
 import os, io, json, time, requests
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 from json import dumps
 
-API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
+# ---- Page Setup (MUST be first Streamlit call) -------------------------------
+st.set_page_config(
+    page_title="Contract Co-Pilot",
+    page_icon="🧾",
+    layout="centered",           # or "wide" if you prefer
+    initial_sidebar_state="expanded",
+)
+
+# ---- Backend / Static endpoints ---------------------------------------------
+# Prefer env var; fallback to your Oracle VM backend (port 8000 from system logs)
+API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8000"
+STATIC_BASE = f"{API_BASE}/static"
+LOGO_URL = f"{STATIC_BASE}/ccp-logo.png?v=1"
+AVATAR_DEFAULT = f"{STATIC_BASE}/avatars/ccp-white-blue.png"
 
 @st.cache_data(ttl=30)  # ping at most once every 30s per session
 def ping_backend() -> bool:
@@ -21,9 +35,8 @@ def ping_backend() -> bool:
         return r.ok
     except Exception:
         return False
-    
- # ==== History: load/save/toggle/delete/add ====================================
-from pathlib import Path
+
+# ==== History: load/save/toggle/delete/add ====================================
 HISTORY_PATH = Path("history.json")
 
 def load_history() -> list[dict]:
@@ -41,7 +54,6 @@ def _save_history(items: list[dict]) -> None:
 def add_history_entry(*, kind: str, title: str, payload: dict | str = None, meta: dict = None, fav: bool=False):
     """Append one line to history and keep only the latest 100."""
     items = st.session_state.get("history") or load_history()
-    from datetime import datetime
     entry = {
         "type": kind,                      # "text", "text_detailed", "pdf_quick", "pdf_detailed"
         "title": (title or "Untitled").strip(),
@@ -69,15 +81,9 @@ def delete_history_item(i: int):
         _save_history(items)
 
 # Ensure session has history loaded on first run
-st.session_state.setdefault("history", load_history())   
+st.session_state.setdefault("history", load_history())
 
-# ---- Branding paths ----
-API_BASE = "http://140.238.88.228:8787"
-STATIC_BASE = f"{API_BASE}/static"
-LOGO_URL = f"{STATIC_BASE}/ccp-logo.png?v=1"
-AVATAR_DEFAULT = f"{STATIC_BASE}/avatars/ccp-white-blue.png"
-
-# Sidebar mini-logo CSS
+# ---- Branding (CSS after set_page_config) ------------------------------------
 st.markdown(f"""
 <style>
 [data-testid="stSidebar"] {{
@@ -92,17 +98,7 @@ st.markdown(f"""
   opacity: .95;
 }}
 </style>
-""", unsafe_allow_html=True)        
-
-# ---- Page Setup --------------------------------------------------------------
-st.set_page_config(page_title="Contract Co-Pilot", page_icon="🧾", layout="centered")
-
-
-# ---- One-shot rerun guard (global) ------------------------------------------
-st.session_state.setdefault("_do_rerun", False)
-if st.session_state._do_rerun:
-    st.session_state._do_rerun = False
-    st.rerun()
+""", unsafe_allow_html=True)
 
 # ---- Auth (matches your auth.py) --------------------------------------------
 from supa import get_supa
