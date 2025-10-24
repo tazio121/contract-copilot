@@ -12,6 +12,10 @@ import streamlit as st
 import streamlit.components.v1 as components
 from json import dumps
 
+# ---- Page Setup --------------------------------------------------------------
+st.set_page_config(page_title="Contract Co-Pilot", page_icon="🧾", layout="centered")
+
+
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
 
 @st.cache_data(ttl=30)  # ping at most once every 30s per session
@@ -93,9 +97,6 @@ st.markdown(f"""
 }}
 </style>
 """, unsafe_allow_html=True)        
-
-# ---- Page Setup --------------------------------------------------------------
-st.set_page_config(page_title="Contract Co-Pilot", page_icon="🧾", layout="centered")
 
 
 # ---- One-shot rerun guard (global) ------------------------------------------
