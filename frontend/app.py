@@ -1006,7 +1006,7 @@ def delete_history_item(idx: int) -> None:
 # =============================================================================
 
 # --- Avatar catalog + helpers (keep near top-level, before the sidebar) ---
-STATIC_BASE = "http://140.238.88.228:8787/static"  # served by FastAPI
+STATIC_BASE = "http://140.238.88.228:8501/static"  # served by FastAPI
 
 AVATAR_CHOICES = {
     "white-blue":   "ccp-white-blue.png",
