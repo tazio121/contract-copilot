@@ -413,6 +413,34 @@ def _qp_to_paragraphs(text: str | None) -> str:
 # Helpers — small utilities
 # =============================================================================
 
+API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8787"
+STATIC_BASE = f"{API_BASE}/static"
+ASSETS = Path(__file__).parent / "static"
+AVATAR_DIR = ASSETS / "avatars"
+AVATAR_DEFAULT = str(AVATAR_DIR / "ccp-white-blue.png")  # local fallback
+
+def _avatar_url(k: str) -> str:
+    """Return an absolute path or URL usable by st.image()."""
+    v = AVATAR_CHOICES.get(k)
+    if isinstance(v, dict):
+        val = v.get("url") or v.get("path") or v.get("file") or ""
+    else:
+        val = v or ""
+
+    if not val:
+        return AVATAR_DEFAULT
+
+    # 1️⃣ Already an HTTP URL → use as-is
+    if val.startswith("http://") or val.startswith("https://"):
+        return val
+
+    # 2️⃣ Local file under static/avatars
+    local_path = AVATAR_DIR / val
+    if local_path.exists():
+        return str(local_path.resolve())     # ← absolute filesystem path
+
+    # 3️⃣ Fallback to backend static URL
+    return f"{STATIC_BASE}/avatars/{val}"
 
 # These are probably already in your file; keep your values if set elsewhere:
 API_BASE = os.getenv("API_BASE") or "http://140.238.88.228:8787"  # your FastAPI host/port
