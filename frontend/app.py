@@ -1198,11 +1198,10 @@ if TAB == "Paste Text":
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
         submit_quick = st.form_submit_button(
-            "Analyze Text",
-            key="quick_analyze_btn",
-            use_container_width=True,
-            disabled=st.session_state.quick_busy,
-        )
+    "Analyze Text",
+    use_container_width=True,
+    disabled=st.session_state.quick_busy,
+)
 
     # ---- submit ----
     if submit_quick:
