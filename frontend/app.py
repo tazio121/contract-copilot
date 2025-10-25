@@ -884,7 +884,7 @@ def _render_recent_menu(i: int, t: str, title: str, e: dict) -> None:
 
     st.markdown('<div class="menu-hr"></div>', unsafe_allow_html=True)
 
-    # --- RENAME (sidebar-safe: no st.columns) ---
+    # --- RENAME (sidebar-safe: removed st.columns) ---
     st.markdown('<div class="menu-rename">', unsafe_allow_html=True)
     st.markdown('<div style="text-align:center;margin:0 0 6px;">Rename</div>', unsafe_allow_html=True)
     new_title = st.text_input(
@@ -935,33 +935,37 @@ def render_recent_sidebar(box):
             title = e.get("title", "Untitled")
             ts = e.get("ts", "—")
 
-            # --- LEFT block (info) ---
-            st.markdown('<div class="side-row">', unsafe_allow_html=True)
-            st.markdown(
-                f"""
-                <div class="side-left">
-                  <div class="side-title">
-                    <span class="{star_class}">{star_char}</span> {title}
-                  </div>
-                  <div class="side-meta">{ts} · {kind}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+            # ✅ Keep your two-column row (left info + right ellipsis) so CSS dots align right
+            c1, c2 = st.columns([1, 0.12], vertical_alignment="center")
 
-            # --- RIGHT block (ellipsis / menu trigger) — sidebar-safe (no columns)
-            st.markdown('<div class="side-ellipsis">', unsafe_allow_html=True)
-            if HAS_POPOVER:
-                with _popover_accessible():
-                    _render_recent_menu(i, t, title, e)
-            else:
-                if st.button(" ", key=f"more_{i}", use_container_width=False):
-                    st.session_state["menu_idx"] = -1 if st.session_state["menu_idx"] == i else i
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+            with c1:
+                st.markdown('<div class="side-row">', unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="side-left">
+                      <div class="side-title">
+                        <span class="{star_class}">{star_char}</span> {title}
+                      </div>
+                      <div class="side-meta">{ts} · {kind}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
-            # --- Fallback inline menu (when no popover)
+            with c2:
+                st.markdown('<div class="side-ellipsis">', unsafe_allow_html=True)
+                if HAS_POPOVER:
+                    with _popover_accessible():
+                        _render_recent_menu(i, t, title, e)
+                else:
+                    # Tiny blank button your CSS styles into "⋯"
+                    if st.button(" ", key=f"more_{i}", use_container_width=False):
+                        st.session_state["menu_idx"] = -1 if st.session_state["menu_idx"] == i else i
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # Fallback inline menu (no popover)
             if (not HAS_POPOVER) and st.session_state.get("menu_idx") == i:
                 with st.container():
                     st.markdown('<div class="fallback-pop">', unsafe_allow_html=True)
