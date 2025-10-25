@@ -1386,11 +1386,10 @@ elif TAB == "Text (Detailed)":
         _warn_near_limit(count, MAX_CHARS, threshold=0.9)
 
         submit_td = st.form_submit_button(
-            "Analyze (Detailed)",
-            key="td_analyze_btn",
-            use_container_width=True,
-            disabled=st.session_state.td_busy,
-        )
+    "Analyze (Detailed)",
+    use_container_width=True,
+    disabled=st.session_state.td_busy,
+)
 
     if submit_td:
         lock_tab("Text (Detailed)")  # keep user on this tab throughout
