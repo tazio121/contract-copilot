@@ -2006,6 +2006,45 @@ elif TAB == "Profile":
 
     user_email = st.session_state.get("supa_session", {}).get("user", {}).get("email", "") or "—"
 
+    # --- normalize AVATAR_CHOICES to a dict: slug -> filename -----------------
+    def _normalize_avatar_choices(avc) -> dict:
+        """
+        Accepts:
+          - dict: {slug: "file.png"}
+          - list[str]: ["ccp-white-blue.png", "black-red.png", ...]
+          - list[tuple]: [(slug, "file.png"), ...] or [("white-blue","ccp-white-blue.png"), ...]
+        Returns:
+          dict {slug: filename}
+        """
+        if isinstance(avc, dict):
+            return {str(k): str(v) for k, v in avc.items()}
+        mapping = {}
+        if isinstance(avc, (list, tuple)):
+            for item in avc:
+                if isinstance(item, str):
+                    fn = item
+                    slug = fn.rsplit(".", 1)[0]
+                    if slug.startswith("ccp-"):
+                        slug = slug[4:]
+                    mapping[slug] = fn
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    slug, fn = str(item[0]), str(item[1])
+                    if not slug:
+                        slug = fn.rsplit(".", 1)[0]
+                        if slug.startswith("ccp-"):
+                            slug = slug[4:]
+                    mapping[slug] = fn
+        return mapping
+
+    _AV = _normalize_avatar_choices(AVATAR_CHOICES)
+    if not _AV:
+        # last-ditch fallback so the UI never crashes
+        _AV = {"black-white": "ccp-black-white.png", "white-blue": "ccp-white-blue.png"}
+
+    # pretty labels
+    slugs  = list(_AV.keys())
+    labels = [s.replace("-", " ").title() for s in slugs]
+
     st.markdown("""
     <style>
       .avatar-stack [data-baseweb="select"] { margin-top: -6px; }
@@ -2016,15 +2055,9 @@ elif TAB == "Profile":
     colA, colB = st.columns([1, 3], vertical_alignment="top")
 
     with colA:
-        # Build labels/slugs safely from AVATAR_CHOICES dict
-        slugs  = list(AVATAR_CHOICES.keys())
-        labels = [s.replace("-", " ").title() for s in slugs]
         current_slug = prefs.get("avatar_choice", "black-white")
-        try:
-            start_index = slugs.index(current_slug)
-        except ValueError:
-            start_index = 0
-            current_slug = slugs[0] if slugs else "black-white"
+        if current_slug not in _AV:
+            current_slug = slugs[0]
 
         st.markdown('<div class="avatar-stack">', unsafe_allow_html=True)
         st.markdown(
@@ -2035,6 +2068,12 @@ elif TAB == "Profile":
             """,
             unsafe_allow_html=True
         )
+
+        try:
+            start_index = slugs.index(current_slug)
+        except ValueError:
+            start_index = 0
+
         picked_label = st.selectbox(
             "Choose your avatar",
             labels,
@@ -2051,7 +2090,7 @@ elif TAB == "Profile":
                 _save_prefs(prefs)
                 st.session_state["prefs"] = prefs
                 st.toast("Avatar updated")
-                st.rerun()  # ensures the preview image updates immediately
+                st.rerun()  # refresh image immediately
             except Exception:
                 st.warning("Couldn't save avatar preference.")
 
