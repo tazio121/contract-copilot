@@ -1634,8 +1634,6 @@ elif TAB == "Upload PDF":
       .chips span{ display:inline-block; padding:2px 8px; margin:2px 6px 2px 0; border:1px solid #2a2f37; background:#0f131a; border-radius:999px; font-size:12px; opacity:.9; }
       /* NEW: tidy paragraph spacing for the summary so it isn’t a blob */
       .cc-summary p { margin:0 0 10px 0; line-height:1.55; }
-      /* subtle text utility (used below) */
-      .cc-subtle{opacity:.7;font-size:13px}
     </style>
     """, unsafe_allow_html=True)
 
@@ -2018,13 +2016,19 @@ elif TAB == "Upload PDF":
 
                         ctext = (c.get("text") or c.get("raw_text") or "").strip()
                         if ctext:
-                            with st.expander("Show clause text"):
-                                st.write(ctext)
+                            txt_key = f"pdfq_show_clause_text_{i}"
+                            if st.toggle("Show clause text", key=txt_key, value=False):
+                                st.markdown(
+                                    f"<div style='border:1px solid #2a2f37;border-radius:8px;padding:8px 10px;margin:6px 0;background:#0f131a;white-space:pre-wrap;'>"
+                                    f"{ctext}</div>",
+                                    unsafe_allow_html=True,
+                                )
 
                         ents = c.get("entities") or []
                         names = sorted({(e.get("text") or "").strip() for e in ents if isinstance(e, dict) and e.get("text")})
                         if names:
-                            with st.expander(f"Entities ({len(names)})"):
+                            ent_key = f"pdfq_show_entities_{i}"
+                            if st.toggle(f"Show entities ({len(names)})", key=ent_key, value=False):
                                 st.markdown('<div class="chips">' + " ".join(f"<span>{n}</span>" for n in names[:24]) + "</div>",
                                             unsafe_allow_html=True)
             st.markdown('</div></div>', unsafe_allow_html=True)
