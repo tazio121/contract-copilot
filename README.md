@@ -45,28 +45,35 @@ Built with **FastAPI (backend)** and **Streamlit (frontend)**, it combines claus
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Frontend Only)
+
+Run the Contract Co-Pilot UI locally — it connects to the hosted backend automatically.  
+No backend setup or extra installs required.
+
 
 ### 1️⃣ Clone the repo
+
 ```bash
-git clone https://github.com/tazio121/contract-copilot.git
+# git clone https://github.com/tazio121/contract-copilot.git
 cd contract-copilot
 
-2️⃣ Set up the environment
+2️⃣ Create & activate virtual environment
 
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+# python -m venv venv
 
-3️⃣ Run the backend (FastAPI)
+Windows
+# .\venv\Scripts\Activate.ps1
 
-uvicorn backend.main:app --host 127.0.0.1 --port 8787 --reload
+macOS / Linux
+# source venv/bin/activate
 
-Open Swagger UI → http://127.0.0.1:8787/docs
+3️⃣ Install frontend dependencies only
+
+# pip install -r frontend/requirements.txt
 
 4️⃣ Run the frontend (Streamlit)
 
-streamlit run frontend/app.py --server.port 8501
+# streamlit run frontend/app.py --server.port 8501
 
 App will open at → http://localhost:8501
 
@@ -111,6 +118,7 @@ MIT License © 2025 Tazio Hussain
 ## 🏁 Project Origins
 
 Started as a local prototype in VS Code to explore AI-driven contract analysis and risk scoring — now evolving into a full-stack tool for smarter, faster contract review.
+
 
 
 
