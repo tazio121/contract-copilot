@@ -11,6 +11,8 @@ from typing import Optional
 import streamlit as st
 import streamlit.components.v1 as components
 from json import dumps
+from dotenv import load_dotenv
+load_dotenv()  # ensures .env values are read
 
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
 

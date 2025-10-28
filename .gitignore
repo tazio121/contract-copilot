@@ -32,3 +32,6 @@ node_modules/
 
 # ---- OS junk
 Thumbs.db
+
+# Ignore local environment files
+frontend/.env
