@@ -14,6 +14,16 @@ from json import dumps
 from dotenv import load_dotenv
 load_dotenv()  # ensures .env values are read
 
+# --- load .env BEFORE importing supa ---
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
+
+from supa import get_supa
+
+sb = get_supa()
+IS_GUEST = sb is None
+
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8787")
 
 # --- NEW: gentle coalesce so Render just works without editing code ----------
@@ -820,9 +830,18 @@ def delete_history_item(idx: int) -> None:
 # =============================================================================
 with st.sidebar:
     st.markdown('<div class="side-label">Account</div>', unsafe_allow_html=True)
-    if st.button("Sign out", use_container_width=True, key="sidebar_signout_btn"):
-        sign_out(_S)
-        st.stop()
+
+    if not IS_GUEST:
+        st.success("Connected to Supabase")
+
+    if IS_GUEST:
+        st.info("Guest Mode — login & history disabled.")
+    else:
+        # Your normal account UI
+        if st.button("Sign out", use_container_width=True, key="sidebar_signout_btn"):
+            sign_out(_S)
+            st.stop()
+
     st.markdown('<hr class="side-hr">', unsafe_allow_html=True)
 
     st.markdown('<div class="side-label">Pilot</div>', unsafe_allow_html=True)
