@@ -2,13 +2,25 @@
 import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from pathlib import Path
 
-load_dotenv()
-_SUPA_URL = os.getenv("SUPABASE_URL")
-_SUPA_KEY = os.getenv("SUPABASE_ANON_KEY")
 
-if not _SUPA_URL or not _SUPA_KEY:
-    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_ANON_KEY in environment.")
+# Load .env that sits next to app.py/supa.py (local dev)
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
-def get_supa() -> Client:
-    return create_client(_SUPA_URL, _SUPA_KEY)
+try:
+    from supabase import create_client
+except Exception:
+    create_client = None  # allows repo to run even if package missing
+
+def get_supa():
+    """
+    Returns a Supabase client if SUPABASE_URL and SUPABASE_ANON_KEY exist,
+    otherwise returns None (Guest Mode).
+    """
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_ANON_KEY")
+    if not url or not key or not create_client:
+        return None
+    return create_client(url, key)
+
